@@ -1,0 +1,6 @@
+{
+  "name": "Mini Moodle - LMS Virtual",
+  "description": "Ambiente Virtual de Aprendizagem simplificado em Português para professores e alunos gerenciarem cursos, conteúdos, tarefas e notas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
