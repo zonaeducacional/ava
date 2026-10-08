@@ -1,8 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import {
+  Clock,
+  Calendar,
+  BookOpen,
+  GraduationCap,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  Award,
+  ChevronRight,
+  Sparkles
+} from 'lucide-react';
 import CircularProgress from '../components/CircularProgress.jsx';
 import NotificationCenter from '../components/NotificationCenter.jsx';
+import ActivityStatusBadge from '../components/ActivityStatusBadge.jsx';
+import CourseProgressBarChart from '../components/CourseProgressBarChart.jsx';
+import UserAvatar from '../components/UserAvatar.jsx';
 import { generateCourseCertificate } from '../utils/generateCertificate.js';
 import {
   courseService,
@@ -152,13 +167,18 @@ export default function Dashboard() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h1 className="page-title">Olá, {user?.name}!</h1>
-          <p className="page-subtitle">
-            {isStudent && 'Acompanhe seus cursos, tarefas pendentes e progresso acadêmico.'}
-            {isTeacher && 'Gerencie seus cursos, novos conteúdos e avaliações de estudantes.'}
-            {isAdmin && 'Visão executiva do LMS e gerenciamento de membros.'}
-          </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <Link to="/profile" title="Ver e editar meu perfil" style={{ textDecoration: 'none' }}>
+            <UserAvatar user={user} size={52} showBorder borderColor="#2e97b7" />
+          </Link>
+          <div>
+            <h1 className="page-title" style={{ margin: 0 }}>Olá, {user?.name}!</h1>
+            <p className="page-subtitle" style={{ margin: '0.2rem 0 0 0' }}>
+              {isStudent && 'Acompanhe seus cursos, tarefas pendentes e progresso acadêmico.'}
+              {isTeacher && 'Gerencie seus cursos, novos conteúdos e avaliações de estudantes.'}
+              {isAdmin && 'Visão executiva do LMS e gerenciamento de membros.'}
+            </p>
+          </div>
         </div>
 
         {isStudent && (
@@ -208,9 +228,20 @@ export default function Dashboard() {
           {/* Card informativo de próximos prazos */}
           {upcomingDeadlines.length > 0 && (
             <div className="card" style={{ borderLeft: '4px solid var(--warning)' }}>
-              <h2 style={{ fontSize: '1.15rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span>⏰</span> Próximos Prazos de Tarefas
-              </h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <h2 style={{ fontSize: '1.15rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Clock size={18} color="var(--warning)" />
+                  <span>Próximos Prazos de Tarefas & Provas</span>
+                </h2>
+                <Link
+                  to="/calendar"
+                  className="btn btn-sm btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}
+                >
+                  <Calendar size={14} />
+                  <span>Abrir Calendário Completo →</span>
+                </Link>
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {upcomingDeadlines.map((task) => (
                   <div
@@ -224,7 +255,10 @@ export default function Dashboard() {
                     }}
                   >
                     <div>
-                      <strong>{task.activityTitle}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                        <strong>{task.activityTitle}</strong>
+                        <ActivityStatusBadge status="pending" size="sm" />
+                      </div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                         Curso: {task.courseTitle}
                       </div>
@@ -260,7 +294,9 @@ export default function Dashboard() {
 
             {courses.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">📚</div>
+                <div className="empty-icon" style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.75rem' }}>
+                  <BookOpen size={44} color="var(--primary)" />
+                </div>
                 <h3>Você ainda não está matriculado em nenhum curso</h3>
                 <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0 1.25rem 0' }}>
                   Utilize o código fornecido pelo seu professor (exemplo do curso inicial: <strong>REACT101</strong>) para se matricular.
@@ -305,6 +341,12 @@ export default function Dashboard() {
                       </div>
                     </div>
 
+                    {/* Gráfico de Barras com Recharts: Atividades Entregues vs. Pendentes vs. Total */}
+                    <CourseProgressBarChart
+                      completed={enr.completedCount}
+                      total={enr.totalItems}
+                    />
+
                     <div style={{ marginTop: 'auto', paddingTop: '0.85rem', borderTop: '1px solid var(--border-color)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', fontSize: '0.825rem' }}>
                         <span style={{ color: 'var(--text-muted)' }}>Atividades concluídas:</span>
@@ -320,7 +362,7 @@ export default function Dashboard() {
                             type="button"
                             className="btn btn-sm"
                             style={{
-                              backgroundColor: '#ca8a04',
+                              backgroundColor: '#2e97b7',
                               color: '#ffffff',
                               border: 'none',
                               fontWeight: 700,
@@ -373,11 +415,10 @@ export default function Dashboard() {
                   color: pendingCorrections > 0 ? 'var(--warning)' : 'var(--success)',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '1.5rem'
+                  justifyContent: 'center'
                 }}
               >
-                {pendingCorrections > 0 ? '📝' : '✅'}
+                {pendingCorrections > 0 ? <FileText size={24} /> : <CheckCircle2 size={24} />}
               </div>
               <div>
                 <h3 style={{ fontSize: '1.1rem' }}>Entregas de Tarefas</h3>
@@ -388,9 +429,14 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
-            <Link to="/grades" className="btn btn-secondary">
-              Acessar Boletim & Notas
-            </Link>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <Link to="/teacher/assignments" className="btn btn-primary">
+                Gerenciar Entregas & Urgências →
+              </Link>
+              <Link to="/grades" className="btn btn-outline">
+                Acessar Boletim
+              </Link>
+            </div>
           </div>
 
           <div>
@@ -403,7 +449,9 @@ export default function Dashboard() {
 
             {courses.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">🎓</div>
+                <div className="empty-icon" style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.75rem' }}>
+                  <GraduationCap size={44} color="var(--primary)" />
+                </div>
                 <h3>Você ainda não possui cursos cadastrados</h3>
                 <p style={{ color: 'var(--text-secondary)', margin: '0.5rem 0 1rem 0' }}>
                   Crie o seu primeiro curso para organizar módulos, tarefas e quizzes.

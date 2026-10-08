@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useFocusMode } from '../context/FocusModeContext.jsx';
 import CourseLiveClassroom from '../components/CourseLiveClassroom.jsx';
 import CourseTextDiscussions from '../components/CourseTextDiscussions.jsx';
 import CourseExternalActivities from '../components/CourseExternalActivities.jsx';
+import ActivityStatusBadge from '../components/ActivityStatusBadge.jsx';
+import CourseDoubtForum from '../components/CourseDoubtForum.jsx';
 import { generateCourseCertificate } from '../utils/generateCertificate.js';
 import { webPushService } from '../services/webPushService.js';
 import {
@@ -12,21 +15,28 @@ import {
   announcementService,
   assignmentService,
   quizService,
-  liveSessionService
+  liveSessionService,
+  forumService
 } from '../services/index.js';
 
 export default function CourseDetail() {
   const { courseId } = useParams();
   const { user, isStudent, isTeacher, isAdmin } = useAuth();
+  const { enterFocusMode } = useFocusMode();
 
   const [course, setCourse] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeLiveSession, setActiveLiveSession] = useState(null);
 
+  // Fórum de Dúvidas
+  const [forumPendingCount, setForumPendingCount] = useState(0);
+  const [forumSectionFilter, setForumSectionFilter] = useState('all');
+
   // Matrícula e progresso do aluno
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [completedItems, setCompletedItems] = useState([]);
+  const [inProgressItems, setInProgressItems] = useState([]);
   const [progressPercent, setProgressPercent] = useState(0);
 
   // Avisos
@@ -94,6 +104,15 @@ export default function CourseDetail() {
       const live = await liveSessionService.getLiveSession(courseId);
       setActiveLiveSession(live);
 
+      // Carregar dúvidas do fórum para contagem
+      try {
+        const forumTopics = await forumService.getTopicsByCourse(courseId);
+        const pend = forumTopics.filter((t) => t.status === 'pending').length;
+        setForumPendingCount(pend);
+      } catch (fErr) {
+        console.warn('Erro ao carregar contagem do fórum:', fErr);
+      }
+
       // Carregar status do aluno
       if (isStudent) {
         const enrolled = await enrollmentService.isStudentEnrolled(user.id, courseId);
@@ -104,6 +123,7 @@ export default function CourseDetail() {
           const userEnrs = await enrollmentService.getEnrollmentsByUser(user.id);
           const thisEnr = userEnrs.find((e) => e.courseId === courseId);
           setCompletedItems(thisEnr?.completedItemIds || []);
+          setInProgressItems(thisEnr?.inProgressItemIds || []);
         }
       }
     } catch (err) {
@@ -116,12 +136,88 @@ export default function CourseDetail() {
   const handleToggleCompleted = async (itemId) => {
     if (!isEnrolled) return;
     try {
-      const result = await enrollmentService.toggleItemCompleted(user.id, courseId, itemId);
+      const isCurrentlyCompleted = completedItems.includes(itemId);
+      const nextStatus = isCurrentlyCompleted ? 'pending' : 'completed';
+      const result = await enrollmentService.setItemStatus(user.id, courseId, itemId, nextStatus);
       setCompletedItems(result.completedItemIds);
+      setInProgressItems(result.inProgressItemIds);
       setProgressPercent(result.progressPercent);
     } catch (err) {
       console.error('Erro ao atualizar progresso:', err);
     }
+  };
+
+  const handleCycleItemStatus = async (itemId) => {
+    if (!isEnrolled) return;
+    try {
+      const result = await enrollmentService.cycleItemStatus(user.id, courseId, itemId);
+      if (result) {
+        setCompletedItems(result.completedItemIds);
+        setInProgressItems(result.inProgressItemIds);
+        setProgressPercent(result.progressPercent);
+      }
+    } catch (err) {
+      console.error('Erro ao alternar status do item:', err);
+    }
+  };
+
+  // Abre um conteúdo específico em Modo de Leitura Focado (removendo menus e barras laterais)
+  const openItemInFocusMode = (item, section) => {
+    const allReadableItems = course?.sections?.flatMap((s) =>
+      (s.items || [])
+        .filter((it) => it.type === 'page' || it.content)
+        .map((it) => ({ ...it, sectionTitle: s.title }))
+    ) || [];
+
+    const currentIndex = allReadableItems.findIndex((it) => it.id === item.id);
+    const prevItem = currentIndex > 0 ? allReadableItems[currentIndex - 1] : null;
+    const nextItem = currentIndex >= 0 && currentIndex < allReadableItems.length - 1 ? allReadableItems[currentIndex + 1] : null;
+
+    const isCompleted = completedItems.includes(item.id);
+    const isInProgress = inProgressItems.includes(item.id);
+    const itemStatus = isCompleted ? 'completed' : isInProgress ? 'in_progress' : 'pending';
+
+    enterFocusMode({
+      id: item.id,
+      title: item.title,
+      content: item.content,
+      type: item.type,
+      courseTitle: course?.title || 'Curso',
+      sectionTitle: section?.title || item.sectionTitle || '',
+      authorName: course?.teacherName || 'Docente Responsável',
+      status: itemStatus,
+      onToggleComplete:
+        isStudent && isEnrolled
+          ? async () => {
+              await handleToggleCompleted(item.id);
+            }
+          : null,
+      onCycleStatus:
+        isStudent && isEnrolled
+          ? async () => {
+              await handleCycleItemStatus(item.id);
+            }
+          : null,
+      onNavigatePrev: prevItem
+        ? () => openItemInFocusMode(prevItem, { title: prevItem.sectionTitle })
+        : null,
+      onNavigateNext: nextItem
+        ? () => openItemInFocusMode(nextItem, { title: nextItem.sectionTitle })
+        : null
+    });
+  };
+
+  // Inicia o Modo de Leitura no primeiro conteúdo disponível do curso
+  const handleStartCourseFocusMode = () => {
+    for (const sec of course?.sections || []) {
+      for (const it of sec.items || []) {
+        if (it.type === 'page' || it.content) {
+          openItemInFocusMode(it, sec);
+          return;
+        }
+      }
+    }
+    alert('Nenhum conteúdo de leitura cadastrado no curso no momento.');
   };
 
   const handleAddSection = async (e) => {
@@ -165,6 +261,7 @@ export default function CourseDetail() {
         },
         quizData: {
           description: itemContent,
+          dueDate: itemDueDate || new Date(Date.now() + 14 * 86400000).toISOString(),
           maxAttempts: itemMaxAttempts
         }
       });
@@ -325,6 +422,9 @@ export default function CourseDetail() {
 
               {canEdit && (
                 <>
+                  <Link to={`/teacher/assignments?courseId=${course.id}`} className="btn btn-outline btn-sm" title="Acompanhar entregas e pendências desta turma">
+                    📝 Entregas de Tarefas
+                  </Link>
                   <Link to={`/grades?courseId=${course.id}`} className="btn btn-secondary btn-sm">
                     📊 Boletim da Turma
                   </Link>
@@ -365,7 +465,7 @@ export default function CourseDetail() {
                     className="btn btn-sm"
                     onClick={handleDownloadCertificate}
                     style={{
-                      backgroundColor: '#ca8a04',
+                      backgroundColor: 'var(--primary)',
                       color: '#ffffff',
                       border: 'none',
                       fontWeight: 700,
@@ -445,6 +545,57 @@ export default function CourseDetail() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setForumSectionFilter('all');
+              setActiveTab('forum');
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: '0.5rem 0.25rem',
+              fontWeight: 600,
+              fontSize: '0.95rem',
+              cursor: 'pointer',
+              color: activeTab === 'forum' ? 'var(--primary)' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'forum' ? '2px solid var(--primary)' : '2px solid transparent',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem'
+            }}
+          >
+            <span>💬 Fórum de Dúvidas</span>
+            {forumPendingCount > 0 ? (
+              <span
+                style={{
+                  background: '#fdf4b0',
+                  color: '#685900',
+                  border: '1px solid #d4c860',
+                  padding: '0.1rem 0.45rem',
+                  borderRadius: '12px',
+                  fontSize: '0.75rem',
+                  fontWeight: 800
+                }}
+                title={`${forumPendingCount} dúvidas aguardando resposta`}
+              >
+                {forumPendingCount} pendente{forumPendingCount > 1 ? 's' : ''}
+              </span>
+            ) : (
+              <span
+                style={{
+                  background: '#a4dcb9',
+                  color: '#134e48',
+                  padding: '0.1rem 0.45rem',
+                  borderRadius: '12px',
+                  fontSize: '0.725rem',
+                  fontWeight: 700
+                }}
+              >
+                Ativo
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('texts')}
             style={{
               background: 'none',
@@ -513,6 +664,27 @@ export default function CourseDetail() {
               AO VIVO
             </span>
           </button>
+
+          {/* Botão de Atalho para o Modo de Leitura do Curso */}
+          <button
+            type="button"
+            onClick={handleStartCourseFocusMode}
+            className="btn btn-sm btn-secondary"
+            style={{
+              marginLeft: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontWeight: 700,
+              fontSize: '0.825rem',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--bg-surface)'
+            }}
+            title="Entrar no Modo de Leitura (foco total sem menus nem barras)"
+          >
+            <span>📖</span>
+            <span>Modo de Leitura</span>
+          </button>
         </div>
       </div>
 
@@ -521,8 +693,8 @@ export default function CourseDetail() {
         <div
           className="card"
           style={{
-            backgroundColor: '#fefce8',
-            border: '2px solid #ca8a04',
+            backgroundColor: '#fdf4b0',
+            border: '2px solid #5bcebf',
             marginBottom: '1.5rem',
             display: 'flex',
             alignItems: 'center',
@@ -538,8 +710,8 @@ export default function CourseDetail() {
                 width: '48px',
                 height: '48px',
                 borderRadius: '50%',
-                backgroundColor: '#fef08a',
-                color: '#854d0e',
+                backgroundColor: '#a4dcb9',
+                color: '#132f38',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -550,10 +722,10 @@ export default function CourseDetail() {
               🎓
             </div>
             <div>
-              <div style={{ fontWeight: 800, color: '#854d0e', fontSize: '1.05rem' }}>
+              <div style={{ fontWeight: 800, color: '#132f38', fontSize: '1.05rem' }}>
                 Parabéns, {user?.name}! Você concluiu 100% deste curso!
               </div>
-              <div style={{ fontSize: '0.875rem', color: '#a16207', marginTop: '0.2rem' }}>
+              <div style={{ fontSize: '0.875rem', color: '#27515c', marginTop: '0.2rem' }}>
                 Todas as aulas, atividades e avaliações foram finalizadas. Seu <strong>Certificado Oficial de Conclusão</strong> está disponível para download imediato em PDF.
               </div>
             </div>
@@ -564,7 +736,7 @@ export default function CourseDetail() {
             className="btn"
             onClick={handleDownloadCertificate}
             style={{
-              backgroundColor: '#ca8a04',
+              backgroundColor: '#2e97b7',
               color: '#ffffff',
               border: 'none',
               fontWeight: 800,
@@ -573,7 +745,7 @@ export default function CourseDetail() {
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              boxShadow: '0 4px 6px -1px rgba(202, 138, 4, 0.3)'
+              boxShadow: '0 4px 6px -1px rgba(46, 151, 183, 0.35)'
             }}
           >
             <span>📜</span> Baixar Certificado (PDF)
@@ -654,7 +826,33 @@ export default function CourseDetail() {
             course.sections.map((section) => (
               <div key={section.id} className="course-section">
                 <div className="section-header">
-                  <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{section.title}</h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <h2 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0 }}>{section.title}</h2>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => {
+                        setForumSectionFilter(section.id);
+                        setActiveTab('forum');
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        fontSize: '0.75rem',
+                        padding: '0.2rem 0.6rem',
+                        backgroundColor: 'rgba(91, 206, 191, 0.15)',
+                        color: '#132f38',
+                        border: '1px solid #5bcebf',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                      title="Abrir o Fórum de Dúvidas filtrado para esta seção"
+                    >
+                      <span>💬 Dúvidas deste módulo</span>
+                    </button>
+                  </div>
                   {canEdit && (
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <button
@@ -687,6 +885,8 @@ export default function CourseDetail() {
                   <ul className="section-items-list">
                     {section.items.map((item) => {
                       const isCompleted = completedItems.includes(item.id);
+                      const isInProgress = inProgressItems.includes(item.id);
+                      const itemStatus = isCompleted ? 'completed' : isInProgress ? 'in_progress' : 'pending';
 
                       return (
                         <li key={item.id} className="section-item">
@@ -763,16 +963,40 @@ export default function CourseDetail() {
                             </div>
                           </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                            {/* Badge visual de status pedagógico */}
+                            <ActivityStatusBadge
+                              status={itemStatus}
+                              isInteractive={isStudent && isEnrolled}
+                              onClick={() => handleCycleItemStatus(item.id)}
+                            />
+
                             {/* Ações diretas dependendo do tipo */}
                             {item.type === 'page' && (
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-secondary"
-                                onClick={() => setActivePageItem(item)}
-                              >
-                                Ler Conteúdo
-                              </button>
+                              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline"
+                                  onClick={() => openItemInFocusMode(item, section)}
+                                  title="Abrir no Modo de Leitura focado (sem barra lateral nem menu superior)"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    fontWeight: 600
+                                  }}
+                                >
+                                  <span>📖</span>
+                                  <span>Modo de Leitura</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-secondary"
+                                  onClick={() => setActivePageItem(item)}
+                                >
+                                  Ver Rápido
+                                </button>
+                              </div>
                             )}
 
                             {item.type === 'assignment' && (
@@ -907,7 +1131,17 @@ export default function CourseDetail() {
         </div>
       )}
 
-      {/* ABA 3: LEITURAS, TEXTOS & DISCUSSÕES (CHAT ESTILO GOOGLE CLASSROOM) */}
+      {/* ABA 3: FÓRUM DE DÚVIDAS DO CURSO */}
+      {activeTab === 'forum' && (
+        <CourseDoubtForum
+          course={course}
+          user={user}
+          canManage={canEdit}
+          initialSectionId={forumSectionFilter}
+        />
+      )}
+
+      {/* ABA 4: LEITURAS, TEXTOS & DISCUSSÕES (CHAT ESTILO GOOGLE CLASSROOM) */}
       {activeTab === 'texts' && (
         <CourseTextDiscussions
           course={course}
@@ -943,14 +1177,34 @@ export default function CourseDetail() {
           <div className="modal-content" style={{ maxWidth: '700px' }}>
             <div className="modal-header">
               <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>{activePageItem.title}</h2>
-              <button
-                type="button"
-                className="btn btn-sm btn-secondary"
-                onClick={() => setActivePageItem(null)}
-                style={{ padding: '0.2rem 0.6rem' }}
-              >
-                ✕
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={() => {
+                    const pageItem = activePageItem;
+                    setActivePageItem(null);
+                    openItemInFocusMode(pageItem);
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontWeight: 700
+                  }}
+                  title="Entrar no Modo de Leitura (remove o menu superior e a barra lateral)"
+                >
+                  <span>📖</span> Modo de Leitura
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => setActivePageItem(null)}
+                  style={{ padding: '0.2rem 0.6rem' }}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             <div className="modal-body" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, fontSize: '1rem' }}>
               {activePageItem.content}
@@ -1172,23 +1426,37 @@ export default function CourseDetail() {
                         onChange={(e) => setItemContent(e.target.value)}
                       />
                     </div>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="item-max-attempts">
-                        Limite de Tentativas Permitidas
-                      </label>
-                      <input
-                        id="item-max-attempts"
-                        type="number"
-                        className="form-input"
-                        min={1}
-                        max={10}
-                        value={itemMaxAttempts}
-                        onChange={(e) => setItemMaxAttempts(e.target.value)}
-                      />
-                      <span className="form-helper">
-                        Após criar o quiz, você poderá adicionar ou editar as questões na tela de gerenciamento do quiz.
-                      </span>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="item-quiz-due-date">
+                          Prazo / Data Limite da Prova
+                        </label>
+                        <input
+                          id="item-quiz-due-date"
+                          type="datetime-local"
+                          className="form-input"
+                          value={itemDueDate}
+                          onChange={(e) => setItemDueDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="item-max-attempts">
+                          Limite de Tentativas
+                        </label>
+                        <input
+                          id="item-max-attempts"
+                          type="number"
+                          className="form-input"
+                          min={1}
+                          max={10}
+                          value={itemMaxAttempts}
+                          onChange={(e) => setItemMaxAttempts(e.target.value)}
+                        />
+                      </div>
                     </div>
+                    <span className="form-helper">
+                      Após criar o quiz ou prova, você poderá adicionar questões na tela de gerenciamento.
+                    </span>
                   </>
                 )}
               </div>

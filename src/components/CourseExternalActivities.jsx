@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { externalActivityService } from '../services/index.js';
+import ActivityStatusBadge from './ActivityStatusBadge.jsx';
 
 // Imagens sugeridas para facilitar a seleção rápida pelo professor
 const PRESET_IMAGES = [
@@ -20,6 +21,7 @@ export default function CourseExternalActivities({
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingActivity, setEditingActivity] = useState(null);
+  const [activityStatuses, setActivityStatuses] = useState({});
 
   // Campos do formulário
   const [title, setTitle] = useState('');
@@ -41,20 +43,54 @@ export default function CourseExternalActivities({
     }
   }, [course?.id]);
 
-  // Carrega status de atividades concluídas pelo aluno do localStorage
+  // Carrega status de atividades (Pendente, Em curso, Concluído) do localStorage
   useEffect(() => {
     if (user?.id && course?.id) {
       try {
-        const key = `completed_ext_acts_${user.id}_${course.id}`;
+        const key = `status_ext_acts_${user.id}_${course.id}`;
         const saved = localStorage.getItem(key);
         if (saved) {
-          setCompletedActivities(JSON.parse(saved));
+          setActivityStatuses(JSON.parse(saved));
+        } else {
+          // Migração retrocompatível
+          const oldKey = `completed_ext_acts_${user.id}_${course.id}`;
+          const oldSaved = localStorage.getItem(oldKey);
+          if (oldSaved) {
+            const parsed = JSON.parse(oldSaved);
+            const migrated = {};
+            Object.keys(parsed).forEach((id) => {
+              migrated[id] = parsed[id] ? 'completed' : 'pending';
+            });
+            setActivityStatuses(migrated);
+          }
         }
       } catch (err) {
-        console.warn('Erro ao carregar conclusões:', err);
+        console.warn('Erro ao carregar status:', err);
       }
     }
   }, [user?.id, course?.id]);
+
+  const setActivityStatus = (actId, newStatus) => {
+    const updated = {
+      ...activityStatuses,
+      [actId]: newStatus
+    };
+    setActivityStatuses(updated);
+    if (user?.id && course?.id) {
+      try {
+        const key = `status_ext_acts_${user.id}_${course.id}`;
+        localStorage.setItem(key, JSON.stringify(updated));
+      } catch (err) {
+        console.warn('Erro ao salvar status:', err);
+      }
+    }
+  };
+
+  const cycleActivityStatus = (actId) => {
+    const current = activityStatuses[actId] || 'pending';
+    const next = current === 'pending' ? 'in_progress' : current === 'in_progress' ? 'completed' : 'pending';
+    setActivityStatus(actId, next);
+  };
 
   const loadActivities = async () => {
     setLoading(true);
@@ -262,7 +298,8 @@ export default function CourseExternalActivities({
           }}
         >
           {activities.map((act) => {
-            const isCompleted = !!completedActivities[act.id];
+            const currentStatus = activityStatuses[act.id] || 'pending';
+            const isCompleted = currentStatus === 'completed';
 
             return (
               <div
@@ -273,7 +310,7 @@ export default function CourseExternalActivities({
                   overflow: 'hidden',
                   display: 'flex',
                   flexDirection: 'column',
-                  border: isCompleted ? '2px solid var(--success)' : '1px solid var(--border-color)',
+                  border: isCompleted ? '2px solid var(--accent-mint)' : '1px solid var(--border-color)',
                   transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                   position: 'relative'
                 }}
@@ -284,7 +321,7 @@ export default function CourseExternalActivities({
                     position: 'relative',
                     width: '100%',
                     height: '180px',
-                    backgroundColor: '#1e293b',
+                    backgroundColor: 'var(--bg-subtle)',
                     overflow: 'hidden'
                   }}
                 >
@@ -304,12 +341,12 @@ export default function CourseExternalActivities({
                     }}
                   />
 
-                  {/* Gradiente escuro para legibilidade */}
+                  {/* Gradiente sutil para legibilidade */}
                   <div
                     style={{
                       position: 'absolute',
                       inset: 0,
-                      background: 'linear-gradient(to top, rgba(15, 23, 42, 0.8) 0%, transparent 60%)'
+                      background: 'linear-gradient(to top, rgba(19, 47, 56, 0.65) 0%, transparent 60%)'
                     }}
                   />
 
@@ -319,38 +356,28 @@ export default function CourseExternalActivities({
                       position: 'absolute',
                       top: '12px',
                       left: '12px',
-                      backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                      backgroundColor: 'rgba(46, 151, 183, 0.92)',
                       backdropFilter: 'blur(4px)',
                       color: '#ffffff',
                       fontSize: '0.725rem',
                       fontWeight: 700,
                       padding: '0.2rem 0.6rem',
                       borderRadius: 'var(--radius-full)',
-                      border: '1px solid rgba(255, 255, 255, 0.2)'
+                      border: '1px solid rgba(164, 220, 185, 0.5)'
                     }}
                   >
                     🏷️ {act.category || 'Atividade Externa'}
                   </span>
 
-                  {/* Badge de Concluída pelo Aluno */}
-                  {isCompleted && (
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: '12px',
-                        right: '12px',
-                        backgroundColor: 'var(--success)',
-                        color: '#ffffff',
-                        fontSize: '0.725rem',
-                        fontWeight: 800,
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: 'var(--radius-full)',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                      }}
-                    >
-                      ✓ CONCLUÍDA
-                    </span>
-                  )}
+                  {/* Badge Visual de Status da Paleta (Pendente / Em curso / Concluído) */}
+                  <div style={{ position: 'absolute', top: '12px', right: '12px' }}>
+                    <ActivityStatusBadge
+                      status={currentStatus}
+                      isInteractive={true}
+                      onClick={() => cycleActivityStatus(act.id)}
+                      size="sm"
+                    />
+                  </div>
                 </div>
 
                 {/* CORPO DO CARD COM TÍTULO E DESCRIÇÃO */}
@@ -401,27 +428,27 @@ export default function CourseExternalActivities({
                     )}
                   </div>
 
-                  {/* Checkbox de Marcação do Aluno */}
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        fontSize: '0.825rem',
-                        color: isCompleted ? 'var(--success)' : 'var(--text-secondary)',
-                        fontWeight: isCompleted ? 700 : 500,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isCompleted}
-                        onChange={() => toggleActivityCompleted(act.id)}
-                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                  {/* STATUS E CONTROLE DE CONCLUSÃO */}
+                  <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Status:</span>
+                      <ActivityStatusBadge
+                        status={currentStatus}
+                        isInteractive={true}
+                        onClick={() => cycleActivityStatus(act.id)}
+                        size="sm"
                       />
-                      <span>{isCompleted ? 'Atividade concluída por mim' : 'Marcar como concluída ao finalizar'}</span>
-                    </label>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => cycleActivityStatus(act.id)}
+                      className="btn btn-sm btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                      title="Alternar entre Pendente, Em curso e Concluído"
+                    >
+                      Alternar ⟳
+                    </button>
                   </div>
 
                   {/* BOTÕES DE AÇÃO DO CARD */}
@@ -431,6 +458,11 @@ export default function CourseExternalActivities({
                       href={act.url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={() => {
+                        if (currentStatus === 'pending') {
+                          setActivityStatus(act.id, 'in_progress');
+                        }
+                      }}
                       className="btn btn-primary"
                       style={{
                         flex: 1,
@@ -609,7 +641,7 @@ export default function CourseExternalActivities({
                         borderRadius: 'var(--radius-md)',
                         overflow: 'hidden',
                         border: '1px solid var(--border-color)',
-                        backgroundColor: '#0f172a'
+                        backgroundColor: 'var(--bg-subtle)'
                       }}
                     >
                       <img

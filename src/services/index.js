@@ -97,6 +97,58 @@ export const authService = {
       console.error(e);
     }
     return true;
+  },
+
+  async updateProfile(userId, updates) {
+    await new Promise((r) => setTimeout(r, 100));
+    const user = db.find('users', userId);
+    if (!user) throw new Error('Usuário não encontrado.');
+
+    const allowedUpdates = {};
+    if (updates.name !== undefined) {
+      if (!updates.name || updates.name.trim().length < 2) {
+        throw new Error('O nome deve ter pelo menos 2 caracteres.');
+      }
+      allowedUpdates.name = updates.name.trim();
+    }
+    if (updates.email !== undefined) {
+      const cleanEmail = updates.email.trim().toLowerCase();
+      if (!cleanEmail || !/\S+@\S+\.\S+/.test(cleanEmail)) {
+        throw new Error('Informe um endereço de e-mail válido.');
+      }
+      const existing = db.where('users', (u) => u.email.toLowerCase() === cleanEmail && u.id !== userId)[0];
+      if (existing) {
+        throw new Error('Este e-mail já está sendo utilizado por outro usuário.');
+      }
+      allowedUpdates.email = cleanEmail;
+    }
+    if (updates.avatar !== undefined) {
+      allowedUpdates.avatar = updates.avatar;
+    }
+    if (updates.bio !== undefined) {
+      allowedUpdates.bio = updates.bio ? updates.bio.trim() : '';
+    }
+    if (updates.phone !== undefined) {
+      allowedUpdates.phone = updates.phone ? updates.phone.trim() : '';
+    }
+    if (updates.institution !== undefined) {
+      allowedUpdates.institution = updates.institution ? updates.institution.trim() : '';
+    }
+    if (updates.course !== undefined) {
+      allowedUpdates.course = updates.course ? updates.course.trim() : '';
+    }
+    if (updates.customStatus !== undefined) {
+      allowedUpdates.customStatus = updates.customStatus ? updates.customStatus.trim() : '';
+    }
+    if (updates.password) {
+      if (updates.password.length < 6) {
+        throw new Error('A senha deve ter no mínimo 6 caracteres.');
+      }
+      allowedUpdates.password = updates.password;
+    }
+
+    const updated = db.update('users', userId, allowedUpdates);
+    return sanitizeUser(updated);
   }
 };
 
@@ -126,6 +178,10 @@ export const userService = {
       throw new Error('Usuário não encontrado.');
     }
     return sanitizeUser(updated);
+  },
+
+  async updateUserProfile(userId, updates) {
+    return authService.updateProfile(userId, updates);
   }
 };
 
@@ -424,6 +480,57 @@ export const enrollmentService = {
     };
   },
 
+  async setItemStatus(studentId, courseId, itemId, newStatus) {
+    await new Promise((r) => setTimeout(r, 50));
+    const enr = db.where('enrollments', { studentId, courseId })[0];
+    if (!enr) {
+      throw new Error('Matrícula não encontrada.');
+    }
+
+    let completed = (enr.completedItemIds || []).filter((id) => id !== itemId);
+    let inProgress = (enr.inProgressItemIds || []).filter((id) => id !== itemId);
+
+    if (newStatus === 'completed') {
+      completed.push(itemId);
+    } else if (newStatus === 'in_progress') {
+      inProgress.push(itemId);
+    }
+
+    db.update('enrollments', enr.id, {
+      completedItemIds: completed,
+      inProgressItemIds: inProgress
+    });
+
+    const totalItems = db.where('items', { courseId }).length;
+    const progressPercent = totalItems > 0 ? Math.round((completed.length / totalItems) * 100) : 0;
+
+    return {
+      status: newStatus,
+      completedItemIds: completed,
+      inProgressItemIds: inProgress,
+      progressPercent
+    };
+  },
+
+  async cycleItemStatus(studentId, courseId, itemId) {
+    const enr = db.where('enrollments', { studentId, courseId })[0];
+    if (!enr) return null;
+
+    const completed = enr.completedItemIds || [];
+    const inProgress = enr.inProgressItemIds || [];
+
+    let nextStatus = 'in_progress';
+    if (completed.includes(itemId)) {
+      nextStatus = 'pending';
+    } else if (inProgress.includes(itemId)) {
+      nextStatus = 'completed';
+    } else {
+      nextStatus = 'in_progress';
+    }
+
+    return this.setItemStatus(studentId, courseId, itemId, nextStatus);
+  },
+
   async getCourseProgress(studentId, courseId) {
     const enr = db.where('enrollments', { studentId, courseId })[0];
     const totalItems = db.where('items', { courseId }).length;
@@ -515,6 +622,273 @@ export const assignmentService = {
       (s) => assignmentIds.includes(s.assignmentId) && (s.score === null || s.score === undefined)
     );
     return pendingSubmissions.length;
+  },
+
+  async getTeacherSubmissionsOverview(teacherId, isAdmin = false) {
+    await new Promise((r) => setTimeout(r, 80));
+
+    // 1. Obter cursos do professor ou todos se admin
+    let courses = [];
+    if (isAdmin) {
+      courses = db.all('courses');
+    } else {
+      courses = db.where('courses', { teacherId });
+    }
+
+    const now = Date.now();
+    const allItems = [];
+    const courseStatsMap = {};
+
+    courses.forEach((c) => {
+      courseStatsMap[c.id] = {
+        course: c,
+        assignmentsCount: 0,
+        enrolledCount: 0,
+        expectedSubmissions: 0,
+        submissionsCount: 0,
+        pendingGradeCount: 0,
+        urgentTeacherCount: 0,
+        urgentStudentCount: 0,
+        totalUrgentCount: 0,
+        gradedCount: 0,
+        notSubmittedCount: 0,
+        deliveryRate: 0
+      };
+    });
+
+    for (const course of courses) {
+      const assignments = db.where('assignments', { courseId: course.id });
+      const enrollments = db.where('enrollments', { courseId: course.id });
+
+      const students = enrollments
+        .map((enr) => {
+          const u = db.find('users', enr.studentId);
+          return u ? { ...sanitizeUser(u), enrolledAt: enr.enrolledAt } : null;
+        })
+        .filter(Boolean);
+
+      const stats = courseStatsMap[course.id];
+      stats.assignmentsCount = assignments.length;
+      stats.enrolledCount = students.length;
+      stats.expectedSubmissions = assignments.length * students.length;
+
+      for (const assignment of assignments) {
+        for (const student of students) {
+          const sub = db.where('submissions', {
+            assignmentId: assignment.id,
+            studentId: student.id
+          })[0] || null;
+
+          const hasSubmission = !!sub;
+          const isGraded = hasSubmission && sub.score !== null && sub.score !== undefined;
+          const isPendingGrade = hasSubmission && !isGraded;
+          const notSubmitted = !hasSubmission;
+
+          let status = 'not_submitted';
+          let statusLabel = 'Não Entregue';
+          if (isGraded) {
+            status = 'graded';
+            statusLabel = 'Avaliada';
+          } else if (isPendingGrade) {
+            status = 'pending_grade';
+            statusLabel = 'Aguardando Correção';
+          }
+
+          // Verificação de Urgência
+          let isUrgent = false;
+          let urgencyType = null; // 'teacher_pending_critical' | 'student_overdue' | 'student_due_soon'
+          let urgencyReason = null;
+          let hoursLeft = null;
+          let hoursWaiting = null;
+
+          if (isPendingGrade) {
+            const subTime = new Date(sub.submittedAt).getTime();
+            hoursWaiting = Math.max(0, Math.round((now - subTime) / (1000 * 60 * 60)));
+            const dueTime = assignment.dueDate ? new Date(assignment.dueDate).getTime() : null;
+            const isPastDue = dueTime && dueTime < now;
+
+            if (hoursWaiting >= 48 || isPastDue) {
+              isUrgent = true;
+              urgencyType = 'teacher_pending_critical';
+              urgencyReason = hoursWaiting >= 48
+                ? `Aguardando avaliação há ${Math.round(hoursWaiting / 24)} dias`
+                : 'Prazo final encerrado sem avaliação do docente';
+            }
+          } else if (notSubmitted) {
+            if (assignment.dueDate) {
+              const dueTime = new Date(assignment.dueDate).getTime();
+              hoursLeft = Math.round((dueTime - now) / (1000 * 60 * 60));
+
+              if (dueTime < now) {
+                isUrgent = true;
+                urgencyType = 'student_overdue';
+                urgencyReason = 'Prazo expirado sem entrega do aluno';
+              } else if (hoursLeft <= 48) {
+                isUrgent = true;
+                urgencyType = 'student_due_soon';
+                urgencyReason = `Vence em ${hoursLeft}h sem entrega`;
+              }
+            }
+          }
+
+          // Atualiza estatísticas da turma
+          if (hasSubmission) stats.submissionsCount++;
+          if (isGraded) stats.gradedCount++;
+          if (isPendingGrade) stats.pendingGradeCount++;
+          if (notSubmitted) stats.notSubmittedCount++;
+          if (urgencyType === 'teacher_pending_critical') stats.urgentTeacherCount++;
+          if (urgencyType === 'student_overdue' || urgencyType === 'student_due_soon') stats.urgentStudentCount++;
+          if (isUrgent) stats.totalUrgentCount++;
+
+          allItems.push({
+            id: sub ? sub.id : `${assignment.id}_${student.id}`,
+            submissionId: sub ? sub.id : null,
+            assignmentId: assignment.id,
+            assignmentTitle: assignment.title,
+            assignmentDescription: assignment.description,
+            assignmentDueDate: assignment.dueDate,
+            maxScore: assignment.maxScore || 10,
+            courseId: course.id,
+            courseTitle: course.title,
+            courseCode: course.code,
+            studentId: student.id,
+            studentName: student.name,
+            studentEmail: student.email,
+            studentAvatar: student.avatar || 'avatar-student-1',
+            studentCourse: student.course || '',
+            hasSubmission,
+            submittedAt: sub ? sub.submittedAt : null,
+            content: sub ? sub.content : null,
+            score: sub && sub.score !== undefined ? sub.score : null,
+            feedback: sub ? sub.feedback : null,
+            gradedAt: sub ? sub.gradedAt : null,
+            gradedBy: sub ? sub.gradedBy : null,
+            status,
+            statusLabel,
+            isUrgent,
+            urgencyType,
+            urgencyReason,
+            hoursWaiting,
+            hoursLeft
+          });
+        }
+      }
+
+      stats.deliveryRate = stats.expectedSubmissions > 0
+        ? Math.round((stats.submissionsCount / stats.expectedSubmissions) * 100)
+        : 0;
+    }
+
+    const totalExpectedSubmissions = allItems.length;
+    const totalSubmissions = allItems.filter((i) => i.hasSubmission).length;
+    const pendingGradeCount = allItems.filter((i) => i.status === 'pending_grade').length;
+    const urgentTeacherCount = allItems.filter((i) => i.urgencyType === 'teacher_pending_critical').length;
+    const gradedCount = allItems.filter((i) => i.status === 'graded').length;
+    const notSubmittedCount = allItems.filter((i) => i.status === 'not_submitted').length;
+    const urgentStudentCount = allItems.filter((i) => i.urgencyType === 'student_overdue' || i.urgencyType === 'student_due_soon').length;
+    const totalUrgentCount = allItems.filter((i) => i.isUrgent).length;
+    const overallDeliveryRate = totalExpectedSubmissions > 0
+      ? Math.round((totalSubmissions / totalExpectedSubmissions) * 100)
+      : 0;
+
+    return {
+      courses: Object.values(courseStatsMap),
+      totalCourses: courses.length,
+      totalExpectedSubmissions,
+      totalSubmissions,
+      pendingGradeCount,
+      urgentTeacherCount,
+      gradedCount,
+      notSubmittedCount,
+      urgentStudentCount,
+      totalUrgentCount,
+      overallDeliveryRate,
+      items: allItems
+    };
+  },
+
+  async sendStudentReminder(studentId, assignmentId, courseId, teacherName = 'Docente') {
+    await new Promise((r) => setTimeout(r, 100));
+    const student = db.find('users', studentId);
+    const assignment = db.find('assignments', assignmentId);
+    if (!student || !assignment) {
+      throw new Error('Estudante ou tarefa não encontrados.');
+    }
+
+    db.insert('announcements', {
+      courseId,
+      title: `Lembrete de Entrega: ${assignment.title}`,
+      content: `Prezado(a) ${student.name}, você possui a atividade "${assignment.title}" pendente de envio. Favor submeter no ambiente virtual antes do prazo limite!`,
+      authorName: teacherName,
+      authorRole: 'professor',
+      createdAt: new Date().toISOString()
+    });
+
+    return {
+      success: true,
+      message: `Lembrete enviado com sucesso para ${student.name}!`
+    };
+  },
+
+  exportSubmissionsCSV(items, filterName = 'relatorio_entregas') {
+    const headers = [
+      'ID Registro',
+      'Curso / Turma',
+      'Código',
+      'Aluno',
+      'E-mail',
+      'Tarefa',
+      'Prazo Final',
+      'Status Entrega',
+      'Data de Envio',
+      'Nota Atribuída',
+      'Nota Máxima',
+      'Feedback Pedagógico',
+      'Urgência',
+      'Motivo da Urgência'
+    ];
+
+    const rows = items.map((item) => [
+      item.id,
+      item.courseTitle,
+      item.courseCode,
+      item.studentName,
+      item.studentEmail,
+      item.assignmentTitle,
+      item.assignmentDueDate ? new Date(item.assignmentDueDate).toLocaleDateString('pt-BR') : 'Sem data',
+      item.statusLabel,
+      item.submittedAt ? new Date(item.submittedAt).toLocaleString('pt-BR') : 'Não enviada',
+      item.score !== null && item.score !== undefined ? item.score : '-',
+      item.maxScore,
+      item.feedback ? item.feedback.replace(/\r?\n/g, ' ') : '',
+      item.isUrgent ? 'URGENTE' : 'Normal',
+      item.urgencyReason || '-'
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map((row) =>
+        row
+          .map((cell) => {
+            const str = String(cell ?? '');
+            if (str.includes(';') || str.includes('"') || str.includes('\n')) {
+              return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+          })
+          .join(';')
+      )
+      .join('\r\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const sanitizedTitle = filterName.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 35);
+    link.setAttribute('download', `entregas_${sanitizedTitle}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 };
 
@@ -1208,6 +1582,529 @@ export const externalActivityService = {
   async deleteActivity(activityId) {
     await new Promise((r) => setTimeout(r, 50));
     return db.delete('external_activities', activityId);
+  }
+};
+
+// ============================================================================
+// 12. CALENDAR SERVICE
+// ============================================================================
+export const calendarService = {
+  /**
+   * Centraliza todos os prazos de tarefas e datas de provas/quizzes
+   * para um estudante com base em seus cursos matriculados.
+   */
+  async getStudentCalendarEvents(studentId) {
+    await new Promise((r) => setTimeout(r, 60));
+    if (!studentId) return [];
+
+    const enrollments = db.where('enrollments', { studentId });
+    if (!enrollments || enrollments.length === 0) return [];
+
+    const enrolledCourseIds = enrollments.map((e) => e.courseId);
+    const enrollmentsMap = {};
+    enrollments.forEach((e) => {
+      enrollmentsMap[e.courseId] = e;
+    });
+
+    const events = [];
+
+    for (const courseId of enrolledCourseIds) {
+      const course = db.find('courses', courseId);
+      if (!course) continue;
+
+      const enr = enrollmentsMap[courseId];
+      const completedIds = enr?.completedItemIds || [];
+      const inProgressIds = enr?.inProgressItemIds || [];
+
+      // 1. Prazos de Tarefas
+      const assignments = db.where('assignments', { courseId });
+      for (const a of assignments) {
+        if (!a.dueDate) continue;
+
+        const submission = db.where('submissions', { assignmentId: a.id, studentId })[0];
+        let status = 'pending';
+        let statusLabel = 'Pendente';
+
+        if (submission) {
+          status = 'completed';
+          statusLabel = submission.score !== null ? 'Avaliada' : 'Entregue';
+        } else if (inProgressIds.includes(a.itemId)) {
+          status = 'in_progress';
+          statusLabel = 'Em curso';
+        } else if (completedIds.includes(a.itemId)) {
+          status = 'completed';
+          statusLabel = 'Concluído';
+        }
+
+        const isOverdue = new Date(a.dueDate).getTime() < Date.now() && status !== 'completed';
+
+        events.push({
+          id: `assign-${a.id}`,
+          activityId: a.id,
+          itemId: a.itemId,
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          teacherName: course.teacherName || 'Docente Responsável',
+          title: a.title,
+          description: a.description || '',
+          type: 'assignment',
+          typeLabel: 'Tarefa',
+          typeIcon: '📝',
+          dueDate: a.dueDate,
+          maxScore: a.maxScore || 10,
+          status,
+          statusLabel,
+          submission: submission || null,
+          score: submission?.score ?? null,
+          feedback: submission?.feedback || null,
+          isOverdue,
+          link: `/courses/${course.id}/assignment/${a.id}`,
+          color: '#2e97b7' // .color5
+        });
+      }
+
+      // 2. Datas de Provas e Quizzes
+      const quizzes = db.where('quizzes', { courseId });
+      for (const q of quizzes) {
+        const dueDate = q.dueDate || '2026-10-20T23:59:59.000Z';
+        const attempts = db.where('quiz_attempts', { quizId: q.id, studentId });
+        const hasAttempts = attempts.length > 0;
+        const isCompleted = hasAttempts || completedIds.includes(q.itemId);
+        const isInProgress = inProgressIds.includes(q.itemId);
+
+        let status = 'pending';
+        let statusLabel = 'Pendente';
+
+        if (isCompleted) {
+          status = 'completed';
+          statusLabel = hasAttempts ? 'Realizado' : 'Concluído';
+        } else if (isInProgress) {
+          status = 'in_progress';
+          statusLabel = 'Em curso';
+        }
+
+        const isOverdue = new Date(dueDate).getTime() < Date.now() && status !== 'completed';
+        const bestScore = hasAttempts ? Math.max(...attempts.map((att) => att.score)) : null;
+
+        events.push({
+          id: `quiz-${q.id}`,
+          activityId: q.id,
+          itemId: q.itemId,
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          teacherName: course.teacherName || 'Docente Responsável',
+          title: q.title,
+          description: q.description || '',
+          type: 'quiz',
+          typeLabel: 'Prova / Quiz',
+          typeIcon: '🎯',
+          dueDate,
+          maxScore: 10,
+          maxAttempts: q.maxAttempts || 3,
+          attemptsCount: attempts.length,
+          status,
+          statusLabel,
+          score: bestScore,
+          isOverdue,
+          link: `/courses/${course.id}/quiz/${q.id}`,
+          color: '#5bcebf' // .color3
+        });
+      }
+
+      // 3. Atividades Externas com prazo
+      const extActivities = db.where('external_activities', { courseId });
+      for (const ext of extActivities) {
+        if (!ext.dueDate) continue;
+        const isCompleted = completedIds.includes(ext.id);
+
+        events.push({
+          id: `ext-${ext.id}`,
+          activityId: ext.id,
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          teacherName: course.teacherName || ext.authorName || 'Docente',
+          title: ext.title,
+          description: ext.description || '',
+          type: 'external',
+          typeLabel: ext.category || 'Atividade Externa',
+          typeIcon: '🔗',
+          dueDate: ext.dueDate,
+          status: isCompleted ? 'completed' : 'pending',
+          statusLabel: isCompleted ? 'Concluído' : 'Pendente',
+          isOverdue: new Date(ext.dueDate).getTime() < Date.now() && !isCompleted,
+          link: `/courses/${course.id}`,
+          color: '#32b9be' // .color4
+        });
+      }
+    }
+
+    return events.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  },
+
+  /**
+   * Retorna eventos para professores com base nos cursos ministrados
+   */
+  async getTeacherCalendarEvents(teacherId) {
+    await new Promise((r) => setTimeout(r, 60));
+    const courses = db.where('courses', { teacherId });
+    if (!courses || courses.length === 0) return [];
+
+    const events = [];
+
+    for (const course of courses) {
+      const enrollments = db.where('enrollments', { courseId: course.id });
+      const studentCount = enrollments.length;
+
+      // Tarefas
+      const assignments = db.where('assignments', { courseId: course.id });
+      for (const a of assignments) {
+        if (!a.dueDate) continue;
+        const subs = db.where('submissions', { assignmentId: a.id });
+        const gradedCount = subs.filter((s) => s.score !== null).length;
+
+        events.push({
+          id: `assign-${a.id}`,
+          activityId: a.id,
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          teacherName: course.teacherName || 'Você',
+          title: a.title,
+          description: a.description || '',
+          type: 'assignment',
+          typeLabel: 'Tarefa',
+          typeIcon: '📝',
+          dueDate: a.dueDate,
+          maxScore: a.maxScore || 10,
+          status: subs.length >= studentCount && studentCount > 0 ? 'completed' : 'pending',
+          statusLabel: `${subs.length}/${studentCount} entregas (${gradedCount} avaliadas)`,
+          submissionCount: subs.length,
+          studentCount,
+          link: `/courses/${course.id}/assignment/${a.id}`,
+          color: '#2e97b7'
+        });
+      }
+
+      // Quizzes
+      const quizzes = db.where('quizzes', { courseId: course.id });
+      for (const q of quizzes) {
+        const dueDate = q.dueDate || '2026-10-20T23:59:59.000Z';
+        const attempts = db.where('quiz_attempts', { quizId: q.id });
+        const distinctStudents = new Set(attempts.map((at) => at.studentId)).size;
+
+        events.push({
+          id: `quiz-${q.id}`,
+          activityId: q.id,
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          teacherName: course.teacherName || 'Você',
+          title: q.title,
+          description: q.description || '',
+          type: 'quiz',
+          typeLabel: 'Prova / Quiz',
+          typeIcon: '🎯',
+          dueDate,
+          maxScore: 10,
+          status: distinctStudents >= studentCount && studentCount > 0 ? 'completed' : 'pending',
+          statusLabel: `${distinctStudents}/${studentCount} alunos realizaram`,
+          attemptsCount: attempts.length,
+          studentCount,
+          link: `/courses/${course.id}/quiz/${q.id}`,
+          color: '#5bcebf'
+        });
+      }
+    }
+
+    return events.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  },
+
+  /**
+   * Retorna todos os eventos acadêmicos do sistema
+   */
+  async getAllCalendarEvents() {
+    await new Promise((r) => setTimeout(r, 60));
+    const courses = db.all('courses');
+    const events = [];
+
+    for (const course of courses) {
+      const assignments = db.where('assignments', { courseId: course.id });
+      for (const a of assignments) {
+        if (!a.dueDate) continue;
+        events.push({
+          id: `assign-${a.id}`,
+          activityId: a.id,
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          teacherName: course.teacherName || 'Geral',
+          title: a.title,
+          description: a.description || '',
+          type: 'assignment',
+          typeLabel: 'Tarefa',
+          typeIcon: '📝',
+          dueDate: a.dueDate,
+          maxScore: a.maxScore || 10,
+          status: 'pending',
+          statusLabel: 'Cadastrada',
+          link: `/courses/${course.id}/assignment/${a.id}`,
+          color: '#2e97b7'
+        });
+      }
+
+      const quizzes = db.where('quizzes', { courseId: course.id });
+      for (const q of quizzes) {
+        const dueDate = q.dueDate || '2026-10-20T23:59:59.000Z';
+        events.push({
+          id: `quiz-${q.id}`,
+          activityId: q.id,
+          courseId: course.id,
+          courseCode: course.code,
+          courseTitle: course.title,
+          teacherName: course.teacherName || 'Geral',
+          title: q.title,
+          description: q.description || '',
+          type: 'quiz',
+          typeLabel: 'Prova / Quiz',
+          typeIcon: '🎯',
+          dueDate,
+          maxScore: 10,
+          status: 'pending',
+          statusLabel: 'Cadastrada',
+          link: `/courses/${course.id}/quiz/${q.id}`,
+          color: '#5bcebf'
+        });
+      }
+    }
+
+    return events.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  }
+};
+
+// ============================================================================
+// 13. FORUM SERVICE (FÓRUM DE DÚVIDAS DO CURSO)
+// ============================================================================
+export const forumService = {
+  /**
+   * Retorna os tópicos de dúvidas de um curso com filtros opcionais
+   */
+  async getTopicsByCourse(courseId, { sectionId = 'all', status = 'all', search = '' } = {}) {
+    await new Promise((r) => setTimeout(r, 40));
+    if (!courseId) return [];
+
+    let topics = db.where('forum_topics', { courseId });
+
+    // Filtro por Seção do Curso
+    if (sectionId && sectionId !== 'all') {
+      if (sectionId === 'general') {
+        topics = topics.filter((t) => !t.sectionId);
+      } else {
+        topics = topics.filter((t) => t.sectionId === sectionId);
+      }
+    }
+
+    // Filtro por Status: 'pending' (Pendente) | 'answered' (Respondido)
+    if (status && status !== 'all') {
+      topics = topics.filter((t) => t.status === status);
+    }
+
+    // Busca textual
+    if (search && search.trim()) {
+      const q = search.toLowerCase().trim();
+      topics = topics.filter((t) => {
+        const matchesTitle = t.title?.toLowerCase().includes(q);
+        const matchesContent = t.content?.toLowerCase().includes(q);
+        const matchesAuthor = t.authorName?.toLowerCase().includes(q);
+        const matchesTags = Array.isArray(t.tags) && t.tags.some((tag) => tag.toLowerCase().includes(q));
+        return matchesTitle || matchesContent || matchesAuthor || matchesTags;
+      });
+    }
+
+    // Ordenação: Fixados no topo, depois pela última atualização / criação
+    return topics.sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+    });
+  },
+
+  /**
+   * Retorna um tópico com suas respostas completas
+   */
+  async getTopicById(topicId, incrementViews = false) {
+    await new Promise((r) => setTimeout(r, 40));
+    const topic = db.find('forum_topics', topicId);
+    if (!topic) return null;
+
+    if (incrementViews) {
+      db.update('forum_topics', topicId, {
+        views: (topic.views || 0) + 1
+      });
+      topic.views = (topic.views || 0) + 1;
+    }
+
+    const replies = db.where('forum_replies', { topicId });
+    replies.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    return {
+      ...topic,
+      replies
+    };
+  },
+
+  /**
+   * Cria uma nova dúvida / pergunta no fórum do curso
+   */
+  async createTopic({
+    courseId,
+    sectionId = null,
+    sectionTitle = 'Geral',
+    title,
+    content,
+    authorId,
+    authorName,
+    authorRole = 'aluno',
+    tags = []
+  }) {
+    await new Promise((r) => setTimeout(r, 60));
+    const now = new Date().toISOString();
+
+    const newTopic = {
+      id: `topic-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      courseId,
+      sectionId: sectionId || null,
+      sectionTitle: sectionTitle || 'Geral do Curso',
+      title: title.trim(),
+      content: content.trim(),
+      authorId,
+      authorName: authorName || 'Aluno',
+      authorRole: authorRole || 'aluno',
+      status: 'pending', // Inicia pendente de resposta
+      tags: Array.isArray(tags) ? tags : [],
+      createdAt: now,
+      updatedAt: now,
+      views: 1,
+      repliesCount: 0,
+      isPinned: false
+    };
+
+    db.create('forum_topics', newTopic);
+    return newTopic;
+  },
+
+  /**
+   * Adiciona uma resposta a uma dúvida
+   */
+  async addReply(topicId, {
+    authorId,
+    authorName,
+    authorRole,
+    content,
+    isTeacherAnswer = false,
+    markAsAnswered = false
+  }) {
+    await new Promise((r) => setTimeout(r, 60));
+    const topic = db.find('forum_topics', topicId);
+    if (!topic) throw new Error('Tópico não encontrado');
+
+    const now = new Date().toISOString();
+    const isDocente = authorRole === 'professor' || authorRole === 'admin' || isTeacherAnswer;
+
+    const newReply = {
+      id: `reply-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      topicId,
+      authorId,
+      authorName,
+      authorRole,
+      content: content.trim(),
+      isTeacherAnswer: isDocente,
+      createdAt: now,
+      upvotes: 0
+    };
+
+    db.create('forum_replies', newReply);
+
+    // Atualiza contadores e status do tópico
+    const newStatus = isDocente || markAsAnswered ? 'answered' : topic.status;
+    const replies = db.where('forum_replies', { topicId });
+
+    db.update('forum_topics', topicId, {
+      updatedAt: now,
+      repliesCount: replies.length,
+      status: newStatus
+    });
+
+    return {
+      reply: newReply,
+      newStatus
+    };
+  },
+
+  /**
+   * Atualiza o status do tópico (pendente vs respondido)
+   */
+  async updateTopicStatus(topicId, status) {
+    await new Promise((r) => setTimeout(r, 40));
+    const updated = db.update('forum_topics', topicId, {
+      status,
+      updatedAt: new Date().toISOString()
+    });
+    return updated;
+  },
+
+  /**
+   * Fixa/Desafixa tópico no topo (Professor/Admin)
+   */
+  async togglePinTopic(topicId) {
+    await new Promise((r) => setTimeout(r, 40));
+    const topic = db.find('forum_topics', topicId);
+    if (!topic) return null;
+
+    const updated = db.update('forum_topics', topicId, {
+      isPinned: !topic.isPinned,
+      updatedAt: new Date().toISOString()
+    });
+    return updated;
+  },
+
+  /**
+   * Exclui um tópico e todas as suas respostas
+   */
+  async deleteTopic(topicId) {
+    await new Promise((r) => setTimeout(r, 50));
+    const replies = db.where('forum_replies', { topicId });
+    replies.forEach((rep) => {
+      db.delete('forum_replies', rep.id);
+    });
+    return db.delete('forum_topics', topicId);
+  },
+
+  /**
+   * Exclui uma resposta específica
+   */
+  async deleteReply(topicId, replyId) {
+    await new Promise((r) => setTimeout(r, 50));
+    db.delete('forum_replies', replyId);
+    const replies = db.where('forum_replies', { topicId });
+    db.update('forum_topics', topicId, {
+      repliesCount: replies.length,
+      updatedAt: new Date().toISOString()
+    });
+    return true;
+  },
+
+  /**
+   * Voto útil / curtida em uma resposta
+   */
+  async upvoteReply(replyId) {
+    await new Promise((r) => setTimeout(r, 30));
+    const reply = db.find('forum_replies', replyId);
+    if (!reply) return null;
+    const upvotes = (reply.upvotes || 0) + 1;
+    return db.update('forum_replies', replyId, { upvotes });
   }
 };
 

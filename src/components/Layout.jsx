@@ -1,16 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useFocusMode } from '../context/FocusModeContext.jsx';
+import { Search, Bell, LogOut, X, User } from 'lucide-react';
 import LmsLogo from './LmsLogo.jsx';
 import WebPushNotificationModal from './WebPushNotificationModal.jsx';
+import EditProfileModal from './EditProfileModal.jsx';
+import UserAvatar from './UserAvatar.jsx';
+import FocusReadingView from './FocusReadingView.jsx';
 import { webPushService } from '../services/webPushService.js';
-import { courseService, enrollmentService } from '../services/index.js';
+import { courseService, enrollmentService, assignmentService } from '../services/index.js';
 
 export default function Layout() {
   const { user, logout, isStudent, isTeacher, isAdmin } = useAuth();
+  const { isFocusMode, focusData, exitFocusMode } = useFocusMode();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+
+  // Estado de contagem de pendências urgentes do professor
+  const [teacherUrgentCount, setTeacherUrgentCount] = useState(0);
 
   // Estado de pesquisa
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
@@ -21,6 +30,9 @@ export default function Layout() {
   // Estado das Notificações Web Push
   const [showPushModal, setShowPushModal] = useState(false);
   const [pushStatus, setPushStatus] = useState('default');
+
+  // Modal de Edição de Perfil e Avatar
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
 
   useEffect(() => {
     setPushStatus(webPushService.getPermission());
@@ -67,6 +79,27 @@ export default function Layout() {
       isMounted = false;
     };
   }, [user, location.pathname]);
+
+  // Carrega contagem de pendências urgentes para professores e admins
+  useEffect(() => {
+    let isMounted = true;
+    const fetchUrgentCount = async () => {
+      if (!user || (!isTeacher && !isAdmin)) return;
+      try {
+        const overview = await assignmentService.getTeacherSubmissionsOverview(user.id, isAdmin);
+        if (isMounted) {
+          setTeacherUrgentCount(overview.totalUrgentCount || 0);
+        }
+      } catch (err) {
+        // silencioso
+      }
+    };
+
+    fetchUrgentCount();
+    return () => {
+      isMounted = false;
+    };
+  }, [user, location.pathname, isTeacher, isAdmin]);
 
   // Fecha dropdown ao clicar fora
   useEffect(() => {
@@ -143,6 +176,22 @@ export default function Layout() {
     }
   };
 
+  // Se estiver no Modo de Leitura (Foco), remove o menu superior e a barra lateral
+  if (isFocusMode && focusData) {
+    return (
+      <div className="focus-mode-wrapper" style={{ width: '100%', minHeight: '100vh' }}>
+        <FocusReadingView
+          data={focusData}
+          onExit={exitFocusMode}
+          onToggleComplete={focusData.onToggleComplete}
+          onCycleStatus={focusData.onCycleStatus}
+          onNavigatePrev={focusData.onNavigatePrev}
+          onNavigateNext={focusData.onNavigateNext}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <header className="navbar">
@@ -164,12 +213,43 @@ export default function Layout() {
             <NavLink to="/courses" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               Cursos
             </NavLink>
+            <NavLink to="/calendar" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Calendário
+            </NavLink>
             <NavLink to="/grades" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               Notas
             </NavLink>
             <NavLink to="/meet" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
               Meet
             </NavLink>
+            <NavLink to="/profile" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Perfil
+            </NavLink>
+            {(isTeacher || isAdmin) && (
+              <NavLink
+                to="/teacher/assignments"
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <span>Entregas das Turmas</span>
+                {teacherUrgentCount > 0 && (
+                  <span
+                    style={{
+                      backgroundColor: '#dc2626',
+                      color: '#ffffff',
+                      fontSize: '0.675rem',
+                      fontWeight: 800,
+                      padding: '0.1rem 0.4rem',
+                      borderRadius: '999px',
+                      lineHeight: 1
+                    }}
+                    title={`${teacherUrgentCount} pendência(s) urgente(s)`}
+                  >
+                    {teacherUrgentCount}
+                  </span>
+                )}
+              </NavLink>
+            )}
             {isAdmin && (
               <NavLink to="/admin/users" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
                 Usuários
@@ -181,7 +261,7 @@ export default function Layout() {
           <div className="navbar-search" ref={searchContainerRef}>
             <form onSubmit={handleSearchSubmit} className="search-input-wrapper">
               <span className="search-icon-prefix" aria-hidden="true">
-                🔍
+                <Search size={15} />
               </span>
               <input
                 type="text"
@@ -210,7 +290,7 @@ export default function Layout() {
                   title="Limpar pesquisa"
                   aria-label="Limpar pesquisa"
                 >
-                  ✕
+                  <X size={13} />
                 </button>
               )}
             </form>
@@ -266,19 +346,19 @@ export default function Layout() {
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.35rem',
-                fontSize: '0.85rem'
+                gap: '0.4rem',
+                fontSize: '0.825rem'
               }}
               title="Alertas & Notificações no Navegador (Web Push)"
             >
-              <span>🔔</span>
-              <span style={{ fontSize: '0.8rem' }}>Alertas</span>
+              <Bell size={15} color="var(--primary)" />
+              <span>Alertas</span>
               <span
                 style={{
-                  width: '8px',
-                  height: '8px',
+                  width: '7px',
+                  height: '7px',
                   borderRadius: '50%',
-                  backgroundColor: pushStatus === 'granted' ? '#22c55e' : '#eab308',
+                  backgroundColor: pushStatus === 'granted' ? '#259e82' : '#eab308',
                   display: 'inline-block'
                 }}
                 title={pushStatus === 'granted' ? 'Notificações Ativas' : 'Clique para ativar notificações'}
@@ -286,7 +366,13 @@ export default function Layout() {
             </button>
 
             {user && (
-              <div className="user-badge" title={`Logado como: ${user.name} (${user.email})`}>
+              <div
+                className="user-badge"
+                onClick={() => setShowEditProfileModal(true)}
+                style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
+                title={`Meu Perfil: ${user.name} (${user.email}) - Clique para editar perfil e avatar`}
+              >
+                <UserAvatar user={user} size={24} showBorder borderColor="#2e97b7" />
                 <span style={{ fontWeight: 600 }}>{user.name.split(' ')[0]}</span>
                 <span className={`user-role-tag ${getRoleClass(user.role)}`}>
                   {getRoleLabel(user.role)}
@@ -294,12 +380,23 @@ export default function Layout() {
               </div>
             )}
             <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowEditProfileModal(true)}
+              style={{ fontSize: '0.825rem', gap: '0.35rem' }}
+              title="Editar perfil e escolher avatar da galeria"
+            >
+              <User size={14} color="var(--primary)" />
+              <span>Perfil</span>
+            </button>
+            <button
               onClick={handleLogout}
               className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.85rem' }}
+              style={{ fontSize: '0.825rem', gap: '0.35rem' }}
               title="Sair da conta"
             >
-              Sair
+              <LogOut size={14} />
+              <span>Sair</span>
             </button>
           </div>
         </div>
@@ -312,6 +409,12 @@ export default function Layout() {
           setShowPushModal(false);
           setPushStatus(webPushService.getPermission());
         }}
+      />
+
+      {/* Modal de Edição de Perfil & Galeria de Avatares */}
+      <EditProfileModal
+        isOpen={showEditProfileModal}
+        onClose={() => setShowEditProfileModal(false)}
       />
 
       <main className="main-content">

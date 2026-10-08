@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import CourseProgressBarChart from '../components/CourseProgressBarChart.jsx';
 import { courseService, enrollmentService } from '../services/index.js';
 
 export default function Courses() {
@@ -10,6 +11,7 @@ export default function Courses() {
 
   const [courses, setCourses] = useState([]);
   const [enrolledCourseIds, setEnrolledCourseIds] = useState([]);
+  const [enrollmentsMap, setEnrollmentsMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -36,9 +38,14 @@ export default function Courses() {
       const all = await courseService.getAllCourses();
       setCourses(all);
 
-      if (isStudent) {
+      if (isStudent && user) {
         const myEnrs = await enrollmentService.getEnrollmentsByUser(user.id);
         setEnrolledCourseIds(myEnrs.map((e) => e.courseId));
+        const map = {};
+        myEnrs.forEach((enr) => {
+          map[enr.courseId] = enr;
+        });
+        setEnrollmentsMap(map);
       }
     } catch (err) {
       setError('Erro ao carregar cursos: ' + err.message);
@@ -226,6 +233,14 @@ export default function Courses() {
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', flex: 1, marginBottom: '1.25rem' }}>
                   {course.description || 'Sem descrição cadastrada.'}
                 </p>
+
+                {/* Gráfico de Barras com Recharts para visualização do progresso das entregas */}
+                {isStudent && isEnrolled && enrollmentsMap[course.id] && (
+                  <CourseProgressBarChart
+                    completed={enrollmentsMap[course.id].completedCount || 0}
+                    total={enrollmentsMap[course.id].totalItems || 0}
+                  />
+                )}
 
                 <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', display: 'flex', gap: '0.5rem' }}>
                   <Link

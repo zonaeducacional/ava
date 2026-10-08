@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { courseTextService } from '../services/index.js';
+import { useFocusMode } from '../context/FocusModeContext.jsx';
 
 /**
  * Componente CourseTextDiscussions
@@ -11,6 +12,7 @@ export default function CourseTextDiscussions({
   user,
   canManage = false // professor do curso ou admin
 }) {
+  const { enterFocusMode } = useFocusMode();
   const [texts, setTexts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -386,13 +388,20 @@ export default function CourseTextDiscussions({
                       type="button"
                       className="btn btn-sm btn-outline"
                       onClick={() => {
-                        setReaderText(textItem);
-                        setFontSize(16);
+                        enterFocusMode({
+                          id: textItem.id,
+                          title: textItem.title,
+                          content: textItem.content,
+                          courseTitle: course?.title || 'Curso',
+                          sectionTitle: 'Leitura & Debate Acadêmico',
+                          authorName: textItem.authorName,
+                          status: 'completed'
+                        });
                       }}
-                      title="Abrir em modo leitura imersiva com ajuste de fonte"
-                      style={{ fontSize: '0.8rem' }}
+                      title="Entrar no Modo de Leitura Focado (sem menus nem barras)"
+                      style={{ fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 600 }}
                     >
-                      🔍 Modo Leitura
+                      <span>📖</span> Modo de Leitura
                     </button>
 
                     <button
@@ -908,6 +917,28 @@ export default function CourseTextDiscussions({
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={() => {
+                    const t = readerText;
+                    setReaderText(null);
+                    enterFocusMode({
+                      id: t.id,
+                      title: t.title,
+                      content: t.content,
+                      courseTitle: course?.title || 'Curso',
+                      sectionTitle: 'Leitura & Debate Acadêmico',
+                      authorName: t.authorName,
+                      status: 'completed'
+                    });
+                  }}
+                  style={{ fontSize: '0.8rem', fontWeight: 700 }}
+                  title="Remover o menu superior e a barra lateral para focar 100% no texto"
+                >
+                  📖 Modo de Foco Total
+                </button>
+
                 {/* Controles de tamanho de fonte */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.1rem 0.4rem' }}>
                   <button

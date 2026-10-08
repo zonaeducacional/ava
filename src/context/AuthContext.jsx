@@ -53,6 +53,13 @@ export const AuthProvider = ({ children }) => {
     setUser(currentUser);
   };
 
+  const updateUserProfile = async (updates) => {
+    if (!user) throw new Error('Nenhum usuário autenticado');
+    const updated = await authService.updateProfile(user.id, updates);
+    setUser(updated);
+    return updated;
+  };
+
   const value = {
     user,
     loading,
@@ -60,6 +67,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     refreshUser,
+    updateUserProfile,
     isStudent: user?.role === 'aluno',
     isTeacher: user?.role === 'professor',
     isAdmin: user?.role === 'admin'

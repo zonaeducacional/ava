@@ -26,18 +26,18 @@ export function generateCourseCertificate({
   doc.setFillColor(252, 252, 254);
   doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
-  // 2. Moldura externa Azul Marinho
-  doc.setDrawColor(30, 58, 138);
+  // 2. Moldura externa Azul Oceânico (.color5: #2e97b7)
+  doc.setDrawColor(46, 151, 183);
   doc.setLineWidth(3);
   doc.rect(10, 10, pageWidth - 20, pageHeight - 20);
 
-  // 3. Moldura interna Dourada
-  doc.setDrawColor(217, 119, 6);
+  // 3. Moldura interna Turquesa (.color3: #5bcebf)
+  doc.setDrawColor(91, 206, 191);
   doc.setLineWidth(1);
   doc.rect(14, 14, pageWidth - 28, pageHeight - 28);
 
-  // Cantoneiras decorativas elegantes
-  doc.setDrawColor(30, 58, 138);
+  // Cantoneiras decorativas elegantes (.color4: #32b9be)
+  doc.setDrawColor(50, 185, 190);
   doc.setLineWidth(0.8);
   doc.line(16, 23, 23, 16);
   doc.line(pageWidth - 23, 16, pageWidth - 16, 23);
@@ -47,40 +47,40 @@ export function generateCourseCertificate({
   // 4. Cabeçalho Institucional
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
-  doc.setTextColor(100, 116, 139);
+  doc.setTextColor(84, 124, 135);
   doc.text('SISTEMA DE GESTÃO DE APRENDIZAGEM • MINI MOODLE LMS', pageWidth / 2, 28, { align: 'center' });
 
   // 5. Título: CERTIFICADO DE CONCLUSÃO
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
-  doc.setTextColor(30, 58, 138);
+  doc.setTextColor(46, 151, 183);
   doc.text('CERTIFICADO DE CONCLUSÃO', pageWidth / 2, 44, { align: 'center' });
 
-  // Faixa decorativa dourada abaixo do título
-  doc.setFillColor(217, 119, 6);
+  // Faixa decorativa turquesa abaixo do título (.color3: #5bcebf)
+  doc.setFillColor(91, 206, 191);
   doc.rect(pageWidth / 2 - 35, 48, 70, 1.4, 'F');
 
   // 6. Texto introdutório
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(12.5);
-  doc.setTextColor(51, 65, 85);
+  doc.setTextColor(44, 82, 93);
   doc.text('Certificamos com mérito que o(a) estudante', pageWidth / 2, 63, { align: 'center' });
 
   // 7. Nome do Estudante em Destaque
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(23);
-  doc.setTextColor(15, 23, 42);
+  doc.setTextColor(19, 47, 56);
   doc.text(studentName.toUpperCase(), pageWidth / 2, 77, { align: 'center' });
 
   // Linha abaixo do nome
-  doc.setDrawColor(203, 213, 225);
+  doc.setDrawColor(164, 220, 185);
   doc.setLineWidth(0.5);
   doc.line(pageWidth / 2 - 65, 81, pageWidth / 2 + 65, 81);
 
   // 8. Descrição de cumprimento pedagógico
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(11.5);
-  doc.setTextColor(71, 85, 105);
+  doc.setTextColor(44, 82, 93);
   doc.text(
     'concluiu com aproveitamento de 100% todas as atividades obrigatórias, leituras,',
     pageWidth / 2,
@@ -97,7 +97,7 @@ export function generateCourseCertificate({
   // 9. Nome do Curso
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.setTextColor(2, 132, 199); // Azul real
+  doc.setTextColor(46, 151, 183); // .color5: #2e97b7
   const splitTitle = doc.splitTextToSize(courseTitle, 220);
   doc.text(splitTitle, pageWidth / 2, 111, { align: 'center' });
 

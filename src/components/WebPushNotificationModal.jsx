@@ -189,13 +189,13 @@ export default function WebPushNotificationModal({ isOpen, onClose }) {
               <div
                 style={{
                   padding: '0.75rem 1rem',
-                  backgroundColor: '#e0f2fe',
-                  border: '1px solid #0284c7',
+                  backgroundColor: 'var(--primary-light)',
+                  border: '1px solid var(--accent-teal)',
                   borderRadius: 'var(--radius-sm)',
                   marginBottom: '1rem',
                   textAlign: 'center',
                   fontWeight: 700,
-                  color: '#0369a1'
+                  color: 'var(--primary)'
                 }}
               >
                 ⏳ Disparando em {countdown} segundos... {testMessage}
