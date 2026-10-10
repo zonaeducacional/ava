@@ -187,6 +187,93 @@ export default function Login() {
             {loading ? 'Processando...' : isRegister ? 'Criar Minha Conta' : 'Entrar no Sistema'}
           </button>
         </form>
+
+        {/* CONTAS DE DEMONSTRAÇÃO PRÉ-CADASTRADAS */}
+        {!isRegister && (
+          <div
+            style={{
+              marginTop: '1.5rem',
+              paddingTop: '1.25rem',
+              borderTop: '1px solid var(--border-color-subtle)'
+            }}
+          >
+            <div
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                color: 'var(--text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                marginBottom: '0.75rem',
+                textAlign: 'center'
+              }}
+            >
+              Acesso Rápido com Contas de Demonstração
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '0.8rem',
+                  padding: '0.45rem 0.75rem',
+                  backgroundColor: 'rgba(46, 151, 183, 0.04)'
+                }}
+                onClick={() => {
+                  setEmail('admin@escola.com');
+                  setPassword('123456');
+                }}
+              >
+                <span>👑 <strong>Administrador:</strong> admin@escola.com</span>
+                <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>123456</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '0.8rem',
+                  padding: '0.45rem 0.75rem',
+                  backgroundColor: 'rgba(50, 185, 190, 0.04)'
+                }}
+                onClick={() => {
+                  setEmail('prof@escola.com');
+                  setPassword('123456');
+                }}
+              >
+                <span>🎓 <strong>Professor(a):</strong> prof@escola.com</span>
+                <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>123456</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '0.8rem',
+                  padding: '0.45rem 0.75rem',
+                  backgroundColor: 'rgba(91, 206, 191, 0.04)'
+                }}
+                onClick={() => {
+                  setEmail('aluno@escola.com');
+                  setPassword('123456');
+                }}
+              >
+                <span>📚 <strong>Aluno:</strong> aluno@escola.com</span>
+                <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>123456</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
