@@ -21,6 +21,14 @@ export default function Courses() {
   const [newDescription, setNewDescription] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
 
+  // Modal de Edição de Curso (Admin / Professor do curso)
+  const [editingCourse, setEditingCourse] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCode, setEditCode] = useState('');
+  const [editTeacherName, setEditTeacherName] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+
   // Modal de Matrícula (Aluno)
   const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [enrollCode, setEnrollCode] = useState('');
@@ -73,6 +81,53 @@ export default function Courses() {
       alert('Erro ao criar curso: ' + err.message);
     } finally {
       setCreateLoading(false);
+    }
+  };
+
+  const handleOpenEditCourse = (course) => {
+    setEditingCourse(course);
+    setEditTitle(course.title || '');
+    setEditDescription(course.description || '');
+    setEditCode(course.code || '');
+    setEditTeacherName(course.teacherName || '');
+  };
+
+  const handleSaveEditCourse = async (e) => {
+    e.preventDefault();
+    if (!editTitle.trim()) {
+      alert('O título do curso é obrigatório.');
+      return;
+    }
+    setEditLoading(true);
+    try {
+      await courseService.updateCourse(editingCourse.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        code: editCode.trim().toUpperCase(),
+        teacherName: editTeacherName.trim()
+      });
+      setEditingCourse(null);
+      await loadCoursesData();
+    } catch (err) {
+      alert('Erro ao atualizar curso: ' + err.message);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleDeleteCourse = async (courseId, courseTitle) => {
+    if (
+      !window.confirm(
+        `ATENÇÃO: Deseja realmente excluir o curso "${courseTitle}"?\n\nTodas as seções, aulas, tarefas, quizzes e matrículas associadas serão permanentemente removidas.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await courseService.deleteCourse(courseId);
+      await loadCoursesData();
+    } catch (err) {
+      alert('Erro ao excluir curso: ' + err.message);
     }
   };
 
@@ -242,7 +297,7 @@ export default function Courses() {
                   />
                 )}
 
-                <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+                <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <Link
                     to={`/courses/${course.id}`}
                     className={`btn ${isEnrolled || isTeacher || isAdmin ? 'btn-primary' : 'btn-secondary'} btn-sm`}
@@ -263,10 +318,137 @@ export default function Courses() {
                       Matricular-se
                     </button>
                   )}
+
+                  {(isAdmin || (isTeacher && isMyCourse)) && (
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        style={{ padding: '0.35rem 0.55rem' }}
+                        onClick={() => handleOpenEditCourse(course)}
+                        title="Editar Curso (Administrador)"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        style={{ padding: '0.35rem 0.55rem', color: '#dc2626', borderColor: '#fca5a5' }}
+                        onClick={() => handleDeleteCourse(course.id, course.title)}
+                        title="Excluir Curso (Administrador)"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* MODAL DE EDITAR CURSO (ADMIN / PROFESSOR) */}
+      {editingCourse && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Editar Curso (Administrador)</h2>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setEditingCourse(null)}
+                style={{ padding: '0.2rem 0.6rem' }}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditCourse}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-course-title">
+                    Título do Curso *
+                  </label>
+                  <input
+                    id="edit-course-title"
+                    type="text"
+                    className="form-input"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-course-code">
+                    Código de Matrícula (Ex: REACT101)
+                  </label>
+                  <input
+                    id="edit-course-code"
+                    type="text"
+                    className="form-input"
+                    value={editCode}
+                    onChange={(e) => setEditCode(e.target.value.toUpperCase())}
+                    style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-course-teacher">
+                    Professor(a) Responsável
+                  </label>
+                  <input
+                    id="edit-course-teacher"
+                    type="text"
+                    className="form-input"
+                    value={editTeacherName}
+                    onChange={(e) => setEditTeacherName(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-course-desc">
+                    Descrição e Ementa
+                  </label>
+                  <textarea
+                    id="edit-course-desc"
+                    className="form-textarea"
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    rows={4}
+                  />
+                </div>
+              </div>
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+                  onClick={() => {
+                    const cid = editingCourse.id;
+                    const ctitle = editingCourse.title;
+                    setEditingCourse(null);
+                    handleDeleteCourse(cid, ctitle);
+                  }}
+                >
+                  🗑️ Excluir Curso
+                </button>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setEditingCourse(null)}
+                    disabled={editLoading}
+                  >
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={editLoading}>
+                    {editLoading ? 'Salvando...' : 'Salvar Alterações'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

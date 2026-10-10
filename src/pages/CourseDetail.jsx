@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useFocusMode } from '../context/FocusModeContext.jsx';
 import CourseLiveClassroom from '../components/CourseLiveClassroom.jsx';
@@ -21,6 +21,7 @@ import {
 
 export default function CourseDetail() {
   const { courseId } = useParams();
+  const navigate = useNavigate();
   const { user, isStudent, isTeacher, isAdmin } = useAuth();
   const { enterFocusMode } = useFocusMode();
 
@@ -46,10 +47,23 @@ export default function CourseDetail() {
   const [newAnnContent, setNewAnnContent] = useState('');
   const [submittingAnn, setSubmittingAnn] = useState(false);
 
-  // Modais de Professor
+  // Modais de Edição de Curso (Admin / Professor)
+  const [showEditCourseModal, setShowEditCourseModal] = useState(false);
+  const [editCourseTitle, setEditCourseTitle] = useState('');
+  const [editCourseCode, setEditCourseCode] = useState('');
+  const [editCourseTeacherName, setEditCourseTeacherName] = useState('');
+  const [editCourseDescription, setEditCourseDescription] = useState('');
+  const [savingCourse, setSavingCourse] = useState(false);
+
+  // Modais de Professor / Admin
   const [showAddSectionModal, setShowAddSectionModal] = useState(false);
   const [sectionTitle, setSectionTitle] = useState('');
 
+  // Edição de Seção
+  const [editingSection, setEditingSection] = useState(null);
+  const [editSectionTitle, setEditSectionTitle] = useState('');
+
+  // Adição e Edição de Item
   const [showAddItemModal, setShowAddItemModal] = useState(false);
   const [targetSectionId, setTargetSectionId] = useState(null);
   const [itemType, setItemType] = useState('page'); // 'page' | 'link' | 'assignment' | 'quiz'
@@ -59,6 +73,15 @@ export default function CourseDetail() {
   const [itemMaxScore, setItemMaxScore] = useState(10);
   const [itemMaxAttempts, setItemMaxAttempts] = useState(3);
   const [submittingItem, setSubmittingItem] = useState(false);
+
+  const [editingItem, setEditingItem] = useState(null);
+  const [editItemTitle, setEditItemTitle] = useState('');
+  const [editItemContent, setEditItemContent] = useState('');
+
+  // Edição de Aviso
+  const [editingAnnouncement, setEditingAnnouncement] = useState(null);
+  const [editAnnTitle, setEditAnnTitle] = useState('');
+  const [editAnnContent, setEditAnnContent] = useState('');
 
   // Modal para leitura de página de texto
   const [activePageItem, setActivePageItem] = useState(null);
@@ -346,6 +369,124 @@ export default function CourseDetail() {
       setAnnouncements(updated);
     } catch (err) {
       alert(err.message);
+    }
+  };
+
+  // --- Handlers de Edição e Exclusão para Administrador / Docente ---
+  const handleOpenEditCourse = () => {
+    if (!course) return;
+    setEditCourseTitle(course.title || '');
+    setEditCourseCode(course.code || '');
+    setEditCourseTeacherName(course.teacherName || '');
+    setEditCourseDescription(course.description || '');
+    setShowEditCourseModal(true);
+  };
+
+  const handleSaveCourse = async (e) => {
+    e.preventDefault();
+    if (!editCourseTitle.trim()) {
+      alert('O título do curso é obrigatório.');
+      return;
+    }
+    setSavingCourse(true);
+    try {
+      await courseService.updateCourse(courseId, {
+        title: editCourseTitle.trim(),
+        code: editCourseCode.trim().toUpperCase(),
+        teacherName: editCourseTeacherName.trim(),
+        description: editCourseDescription.trim()
+      });
+      setShowEditCourseModal(false);
+      await loadCourseDetails();
+    } catch (err) {
+      alert('Erro ao atualizar curso: ' + err.message);
+    } finally {
+      setSavingCourse(false);
+    }
+  };
+
+  const handleDeleteCourseFromDetail = async () => {
+    if (
+      !window.confirm(
+        `ATENÇÃO: Deseja realmente excluir este curso ("${course?.title}")?\n\nTodas as seções, aulas, tarefas, quizzes e matrículas associadas serão permanentemente removidas.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await courseService.deleteCourse(courseId);
+      navigate('/courses');
+    } catch (err) {
+      alert('Erro ao excluir curso: ' + err.message);
+    }
+  };
+
+  const handleOpenEditSection = (section) => {
+    setEditingSection(section);
+    setEditSectionTitle(section.title || '');
+  };
+
+  const handleSaveEditSection = async (e) => {
+    e.preventDefault();
+    if (!editSectionTitle.trim()) {
+      alert('O título da seção é obrigatório.');
+      return;
+    }
+    try {
+      await courseService.updateSection(editingSection.id, editSectionTitle.trim());
+      setEditingSection(null);
+      await loadCourseDetails();
+    } catch (err) {
+      alert('Erro ao atualizar seção: ' + err.message);
+    }
+  };
+
+  const handleOpenEditItem = (item) => {
+    setEditingItem(item);
+    setEditItemTitle(item.title || '');
+    setEditItemContent(item.content || '');
+  };
+
+  const handleSaveEditItem = async (e) => {
+    e.preventDefault();
+    if (!editItemTitle.trim()) {
+      alert('O título do item é obrigatório.');
+      return;
+    }
+    try {
+      await courseService.updateItem(editingItem.id, {
+        title: editItemTitle.trim(),
+        content: editItemContent.trim()
+      });
+      setEditingItem(null);
+      await loadCourseDetails();
+    } catch (err) {
+      alert('Erro ao atualizar item: ' + err.message);
+    }
+  };
+
+  const handleOpenEditAnnouncement = (ann) => {
+    setEditingAnnouncement(ann);
+    setEditAnnTitle(ann.title || '');
+    setEditAnnContent(ann.content || '');
+  };
+
+  const handleSaveEditAnnouncement = async (e) => {
+    e.preventDefault();
+    if (!editAnnTitle.trim() || !editAnnContent.trim()) {
+      alert('Título e conteúdo são obrigatórios.');
+      return;
+    }
+    try {
+      await announcementService.updateAnnouncement(editingAnnouncement.id, {
+        title: editAnnTitle.trim(),
+        content: editAnnContent.trim()
+      });
+      setEditingAnnouncement(null);
+      const updated = await announcementService.getAnnouncementsByCourse(courseId);
+      setAnnouncements(updated);
+    } catch (err) {
+      alert('Erro ao atualizar aviso: ' + err.message);
     }
   };
 

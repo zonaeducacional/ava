@@ -23,7 +23,8 @@ import {
   ExternalLink,
   ChevronDown,
   Layers,
-  Award
+  Award,
+  Trash2
 } from 'lucide-react';
 import UserAvatar from '../components/UserAvatar.jsx';
 import ActivityStatusBadge from '../components/ActivityStatusBadge.jsx';
@@ -255,6 +256,25 @@ export default function TeacherAssignments() {
       alert('Erro ao salvar nota: ' + err.message);
     } finally {
       setIsSavingGrade(false);
+    }
+  };
+
+  // Excluir / Resetar Entrega do Aluno (Admin / Professor)
+  const handleDeleteSubmission = async (submissionId, studentName) => {
+    if (!submissionId) return;
+    if (
+      !window.confirm(
+        `ATENÇÃO: Deseja realmente excluir a entrega do aluno "${studentName}"?\n\nO status voltará para não entregue e o aluno poderá enviar uma nova resposta.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await assignmentService.deleteSubmission(submissionId);
+      showToast(`Entrega de "${studentName}" excluída com sucesso!`);
+      await loadOverviewData();
+    } catch (err) {
+      alert('Erro ao excluir entrega: ' + err.message);
     }
   };
 
@@ -1388,6 +1408,24 @@ export default function TeacherAssignments() {
                             <span>{item.status === 'graded' ? 'Reavaliar' : 'Avaliar'}</span>
                           </button>
 
+                          {/* Botão Excluir / Resetar Entrega */}
+                          {item.hasSubmission && item.submissionId && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSubmission(item.submissionId, item.studentName)}
+                              className="btn btn-sm btn-outline"
+                              style={{
+                                padding: '0.35rem 0.55rem',
+                                fontSize: '0.75rem',
+                                color: '#dc2626',
+                                borderColor: '#fca5a5'
+                              }}
+                              title="Excluir / Resetar entrega do aluno (Admin)"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+
                           {/* Botão Enviar Lembrete (para não entregues) */}
                           {item.status === 'not_submitted' && (
                             <button
@@ -1626,6 +1664,17 @@ export default function TeacherAssignments() {
                             >
                               {item.status === 'graded' ? 'Reavaliar' : 'Avaliar'}
                             </button>
+                            {item.submissionId && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSubmission(item.submissionId, item.studentName)}
+                                className="btn btn-sm btn-outline"
+                                style={{ padding: '0.3rem 0.45rem', fontSize: '0.75rem', color: '#dc2626', borderColor: '#fca5a5' }}
+                                title="Excluir / Resetar entrega (Admin)"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
                           </>
                         ) : (
                           <button

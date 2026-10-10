@@ -37,6 +37,18 @@ export default function CourseTextDiscussions({
   const [commentInputs, setCommentInputs] = useState({});
   const [submittingComments, setSubmittingComments] = useState({});
 
+  // Edição de Texto (Admin/Professor)
+  const [editingText, setEditingText] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editSummary, setEditSummary] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+
+  // Edição de Comentário
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [editCommentText, setEditCommentText] = useState('');
+  const [editCommentLoading, setEditCommentLoading] = useState(false);
+
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -200,6 +212,58 @@ export default function CourseTextDiscussions({
       setTexts((prev) => prev.map((t) => (t.id === textId ? updated : t)));
     } catch (err) {
       alert('Erro ao excluir comentário: ' + err.message);
+    }
+  };
+
+  const handleOpenEditText = (textItem) => {
+    setEditingText(textItem);
+    setEditTitle(textItem.title || '');
+    setEditSummary(textItem.summary || '');
+    setEditContent(textItem.content || '');
+  };
+
+  const handleSaveEditText = async (e) => {
+    e.preventDefault();
+    if (!editTitle.trim() || !editContent.trim()) {
+      alert('Título e conteúdo são obrigatórios.');
+      return;
+    }
+    setEditLoading(true);
+    try {
+      await courseTextService.updateText(editingText.id, {
+        title: editTitle.trim(),
+        summary: editSummary.trim(),
+        content: editContent.trim()
+      });
+      setEditingText(null);
+      await loadTexts();
+    } catch (err) {
+      alert('Erro ao atualizar texto: ' + err.message);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleOpenEditComment = (comm) => {
+    setEditingCommentId(comm.id);
+    setEditCommentText(comm.comment || '');
+  };
+
+  const handleSaveEditComment = async (textId, commentId) => {
+    if (!editCommentText.trim()) {
+      alert('O comentário não pode estar vazio.');
+      return;
+    }
+    setEditCommentLoading(true);
+    try {
+      await courseTextService.updateComment(commentId, editCommentText.trim());
+      setEditingCommentId(null);
+      const updated = await courseTextService.getTextById(textId);
+      setTexts((prev) => prev.map((t) => (t.id === textId ? updated : t)));
+    } catch (err) {
+      alert('Erro ao atualizar comentário: ' + err.message);
+    } finally {
+      setEditCommentLoading(false);
     }
   };
 
@@ -414,15 +478,26 @@ export default function CourseTextDiscussions({
                     </button>
 
                     {canManage && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-secondary"
-                        onClick={() => handleDeleteText(textItem.id)}
-                        style={{ color: 'var(--danger)', fontSize: '0.8rem' }}
-                        title="Excluir publicação"
-                      >
-                        🗑️
-                      </button>
+                      <div style={{ display: 'inline-flex', gap: '0.35rem' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => handleOpenEditText(textItem)}
+                          style={{ fontSize: '0.8rem' }}
+                          title="Editar publicação (Admin / Professor)"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => handleDeleteText(textItem.id)}
+                          style={{ color: 'var(--danger)', fontSize: '0.8rem' }}
+                          title="Excluir publicação (Admin / Professor)"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -601,28 +676,76 @@ export default function CourseTextDiscussions({
                                 </span>
 
                                 {canDelete && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteComment(textItem.id, comm.id)}
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      color: 'var(--text-muted)',
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem',
-                                      marginLeft: 'auto',
-                                      padding: '0 0.25rem'
-                                    }}
-                                    title="Excluir comentário"
-                                  >
-                                    ✕
-                                  </button>
+                                  <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditComment(comm)}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--text-muted)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        padding: '0 0.2rem'
+                                      }}
+                                      title="Editar comentário"
+                                    >
+                                      ✏️
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteComment(textItem.id, comm.id)}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--text-muted)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem',
+                                        padding: '0 0.2rem'
+                                      }}
+                                      title="Excluir comentário"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
                                 )}
                               </div>
 
-                              <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginTop: '0.25rem', lineHeight: 1.5 }}>
-                                {comm.comment}
-                              </div>
+                              {editingCommentId === comm.id ? (
+                                <div style={{ marginTop: '0.4rem' }}>
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={editCommentText}
+                                    onChange={(e) => setEditCommentText(e.target.value)}
+                                    style={{ fontSize: '0.85rem', padding: '0.3rem 0.5rem', marginBottom: '0.35rem', width: '100%' }}
+                                  />
+                                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-secondary"
+                                      onClick={() => setEditingCommentId(null)}
+                                      disabled={editCommentLoading}
+                                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-primary"
+                                      onClick={() => handleSaveEditComment(textItem.id, comm.id)}
+                                      disabled={editCommentLoading}
+                                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                                    >
+                                      {editCommentLoading ? 'Salvando...' : 'Salvar'}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginTop: '0.25rem', lineHeight: 1.5 }}>
+                                  {comm.comment}
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
@@ -1012,6 +1135,86 @@ export default function CourseTextDiscussions({
                 Fechar Modo Leitura
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDIÇÃO DE TEXTO (ADMIN / PROFESSOR) */}
+      {editingText && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-content" style={{ maxWidth: '640px' }}>
+            <div className="modal-header">
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>
+                Editar Publicação de Leitura (Admin)
+              </h2>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setEditingText(null)}
+                style={{ padding: '0.2rem 0.6rem' }}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditText}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-text-title">
+                    Título do Texto *
+                  </label>
+                  <input
+                    id="edit-text-title"
+                    type="text"
+                    className="form-input"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-text-summary">
+                    Resumo / Introdução
+                  </label>
+                  <input
+                    id="edit-text-summary"
+                    type="text"
+                    className="form-input"
+                    value={editSummary}
+                    onChange={(e) => setEditSummary(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-text-content">
+                    Conteúdo na Íntegra *
+                  </label>
+                  <textarea
+                    id="edit-text-content"
+                    rows={8}
+                    className="form-textarea"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    required
+                    style={{ lineHeight: 1.6 }}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setEditingText(null)}
+                  disabled={editLoading}
+                >
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={editLoading}>
+                  {editLoading ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

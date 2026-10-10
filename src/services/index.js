@@ -182,6 +182,45 @@ export const userService = {
 
   async updateUserProfile(userId, updates) {
     return authService.updateProfile(userId, updates);
+  },
+
+  async updateUser(userId, updates) {
+    await new Promise((r) => setTimeout(r, 100));
+    const user = db.find('users', userId);
+    if (!user) throw new Error('Usuário não encontrado.');
+    const updated = db.update('users', userId, updates);
+    return sanitizeUser(updated);
+  },
+
+  async deleteUser(userId) {
+    await new Promise((r) => setTimeout(r, 100));
+    const enrollments = db.where('enrollments', { studentId: userId });
+    enrollments.forEach((en) => db.remove('enrollments', en.id));
+    return db.remove('users', userId);
+  },
+
+  async createUser({ name, email, password, role, bio, institution, course }) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (!name || !email || !password) {
+      throw new Error('Nome, e-mail e senha são obrigatórios.');
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = db.where('users', (u) => u.email.toLowerCase() === cleanEmail)[0];
+    if (existing) {
+      throw new Error('Já existe um usuário cadastrado com este e-mail.');
+    }
+    const newUser = db.insert('users', {
+      name: name.trim(),
+      email: cleanEmail,
+      password: password.trim(),
+      role: role || 'aluno',
+      avatar: role === 'professor' ? 'avatar-prof-2' : role === 'admin' ? 'avatar-minimal-graduate' : 'avatar-student-1',
+      bio: bio ? bio.trim() : '',
+      institution: institution ? institution.trim() : '',
+      course: course ? course.trim() : '',
+      createdAt: new Date().toISOString()
+    });
+    return sanitizeUser(newUser);
   }
 };
 
@@ -889,6 +928,33 @@ export const assignmentService = {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  },
+
+  async updateAssignment(assignmentId, updates) {
+    await new Promise((r) => setTimeout(r, 100));
+    const assign = db.find('assignments', assignmentId);
+    if (!assign) throw new Error('Tarefa não encontrada.');
+    const updated = db.update('assignments', assignmentId, updates);
+    if (assign.itemId && updates.title) {
+      db.update('items', assign.itemId, { title: updates.title });
+    }
+    return updated;
+  },
+
+  async deleteAssignment(assignmentId) {
+    await new Promise((r) => setTimeout(r, 100));
+    const assign = db.find('assignments', assignmentId);
+    if (assign?.itemId) {
+      db.remove('items', assign.itemId);
+    }
+    const subs = db.where('submissions', { assignmentId });
+    subs.forEach((s) => db.remove('submissions', s.id));
+    return db.remove('assignments', assignmentId);
+  },
+
+  async deleteSubmission(submissionId) {
+    await new Promise((r) => setTimeout(r, 80));
+    return db.remove('submissions', submissionId);
   }
 };
 
@@ -899,6 +965,22 @@ export const quizService = {
   async getQuiz(quizId) {
     await new Promise((r) => setTimeout(r, 100));
     return db.find('quizzes', quizId);
+  },
+
+  async deleteQuiz(quizId) {
+    await new Promise((r) => setTimeout(r, 100));
+    const quiz = db.find('quizzes', quizId);
+    if (quiz?.itemId) {
+      db.remove('items', quiz.itemId);
+    }
+    const attempts = db.where('quiz_attempts', { quizId });
+    attempts.forEach((a) => db.remove('quiz_attempts', a.id));
+    return db.remove('quizzes', quizId);
+  },
+
+  async deleteQuizAttempt(attemptId) {
+    await new Promise((r) => setTimeout(r, 80));
+    return db.remove('quiz_attempts', attemptId);
   },
 
   async getQuizByItem(itemId) {
@@ -994,6 +1076,17 @@ export const announcementService = {
   async deleteAnnouncement(announcementId) {
     await new Promise((r) => setTimeout(r, 100));
     return db.remove('announcements', announcementId);
+  },
+
+  async updateAnnouncement(announcementId, { title, content }) {
+    await new Promise((r) => setTimeout(r, 80));
+    if (!title || !title.trim() || !content || !content.trim()) {
+      throw new Error('Título e conteúdo são obrigatórios.');
+    }
+    return db.update('announcements', announcementId, {
+      title: title.trim(),
+      content: content.trim()
+    });
   }
 };
 
@@ -1170,6 +1263,71 @@ export const gradeService = {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  },
+
+  async updateStudentGrade({ activityId, activityType, studentId, score, feedback, gradedBy }) {
+    await new Promise((r) => setTimeout(r, 80));
+    const numScore = score !== '' && score !== null && score !== undefined ? parseFloat(score) : null;
+    if (activityType === 'Tarefa') {
+      let sub = db.where('submissions', { assignmentId: activityId, studentId })[0];
+      if (!sub) {
+        const student = db.find('users', studentId);
+        return db.insert('submissions', {
+          assignmentId: activityId,
+          studentId,
+          studentName: student?.name || 'Aluno',
+          content: '[Lançamento direto pela Caderneta de Notas]',
+          score: numScore,
+          feedback: feedback || '',
+          submittedAt: new Date().toISOString(),
+          gradedAt: new Date().toISOString(),
+          gradedBy: gradedBy || 'Administrador'
+        });
+      }
+      return db.update('submissions', sub.id, {
+        score: numScore,
+        feedback: feedback !== undefined ? feedback : sub.feedback,
+        gradedAt: new Date().toISOString(),
+        gradedBy: gradedBy || 'Administrador'
+      });
+    } else {
+      // Quiz: atualiza tentativa existente ou insere uma nova
+      const attempts = db.where('quiz_attempts', { quizId: activityId, studentId });
+      if (attempts.length > 0) {
+        return db.update('quiz_attempts', attempts[0].id, {
+          score: numScore !== null ? numScore : 0,
+          passed: numScore !== null ? numScore >= 6 : false,
+          gradedBy: gradedBy || 'Administrador'
+        });
+      } else {
+        const student = db.find('users', studentId);
+        return db.insert('quiz_attempts', {
+          quizId: activityId,
+          studentId,
+          studentName: student?.name || 'Aluno',
+          answers: {},
+          score: numScore !== null ? numScore : 0,
+          totalQuestions: 1,
+          correctAnswers: 1,
+          passed: numScore !== null ? numScore >= 6 : false,
+          attemptedAt: new Date().toISOString(),
+          gradedBy: gradedBy || 'Administrador'
+        });
+      }
+    }
+  },
+
+  async deleteStudentGrade({ activityId, activityType, studentId }) {
+    await new Promise((r) => setTimeout(r, 80));
+    if (activityType === 'Tarefa') {
+      const subs = db.where('submissions', { assignmentId: activityId, studentId });
+      subs.forEach((s) => db.remove('submissions', s.id));
+      return true;
+    } else {
+      const attempts = db.where('quiz_attempts', { quizId: activityId, studentId });
+      attempts.forEach((a) => db.remove('quiz_attempts', a.id));
+      return true;
+    }
   }
 };
 
@@ -1515,6 +1673,26 @@ export const courseTextService = {
   async deleteComment(commentId) {
     await new Promise((r) => setTimeout(r, 40));
     return db.delete('text_comments', commentId);
+  },
+
+  async updateText(textId, { title, summary, content }) {
+    await new Promise((r) => setTimeout(r, 70));
+    if (!title?.trim() || !content?.trim()) {
+      throw new Error('Título e conteúdo são obrigatórios.');
+    }
+    return db.update('course_texts', textId, {
+      title: title.trim(),
+      summary: summary ? summary.trim() : '',
+      content: content.trim()
+    });
+  },
+
+  async updateComment(commentId, comment) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (!comment?.trim()) throw new Error('Comentário não pode estar vazio.');
+    return db.update('text_comments', commentId, {
+      comment: comment.trim()
+    });
   }
 };
 
@@ -2105,6 +2283,29 @@ export const forumService = {
     if (!reply) return null;
     const upvotes = (reply.upvotes || 0) + 1;
     return db.update('forum_replies', replyId, { upvotes });
+  },
+
+  async updateTopic(topicId, { title, content, sectionId, sectionTitle, tags }) {
+    await new Promise((r) => setTimeout(r, 60));
+    if (!title?.trim() || !content?.trim()) {
+      throw new Error('Título e conteúdo da dúvida são obrigatórios.');
+    }
+    return db.update('forum_topics', topicId, {
+      title: title.trim(),
+      content: content.trim(),
+      sectionId: sectionId || null,
+      sectionTitle: sectionTitle || 'Geral do Curso',
+      tags: Array.isArray(tags) ? tags : [],
+      updatedAt: new Date().toISOString()
+    });
+  },
+
+  async updateReply(replyId, content) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (!content?.trim()) throw new Error('Conteúdo da resposta não pode estar vazio.');
+    return db.update('forum_replies', replyId, {
+      content: content.trim()
+    });
   }
 };
 

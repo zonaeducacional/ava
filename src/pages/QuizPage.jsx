@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { quizService, courseService, enrollmentService } from '../services/index.js';
+import { db } from '../lib/db.js';
 
 export default function QuizPage() {
   const { courseId, quizId } = useParams();
+  const navigate = useNavigate();
   const { user, isStudent, isTeacher, isAdmin } = useAuth();
 
   const [quiz, setQuiz] = useState(null);
@@ -17,6 +19,17 @@ export default function QuizPage() {
   const [editableQuiz, setEditableQuiz] = useState(null);
   const [savingEditor, setSavingEditor] = useState(false);
   const [editorSuccessMsg, setEditorSuccessMsg] = useState('');
+
+  // Modal de Edição de Informações Básicas do Quiz (Admin / Professor)
+  const [showEditQuizInfoModal, setShowEditQuizInfoModal] = useState(false);
+  const [editQuizTitle, setEditQuizTitle] = useState('');
+  const [editQuizDescription, setEditQuizDescription] = useState('');
+  const [editQuizDueDate, setEditQuizDueDate] = useState('');
+  const [editQuizMaxAttempts, setEditQuizMaxAttempts] = useState(3);
+  const [savingQuizInfo, setSavingQuizInfo] = useState(false);
+
+  // Tentativas Gerais (Admin / Professor)
+  const [allAttempts, setAllAttempts] = useState([]);
 
   // Modo Aluno: Respostas e Tentativas
   const [selectedAnswers, setSelectedAnswers] = useState({});
@@ -54,11 +67,80 @@ export default function QuizPage() {
       if (isStudent) {
         const studentAttempts = await quizService.getStudentAttempts(quizData.id, user.id);
         setAttempts(studentAttempts);
+      } else if (canEdit) {
+        const attemptsList = db.where('quiz_attempts', { quizId: quizData.id }).sort(
+          (a, b) => new Date(b.attemptedAt).getTime() - new Date(a.attemptedAt).getTime()
+        );
+        setAllAttempts(attemptsList);
       }
     } catch (err) {
       setError('Erro ao carregar quiz: ' + err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenEditQuizInfo = () => {
+    if (!quiz) return;
+    setEditQuizTitle(quiz.title || '');
+    setEditQuizDescription(quiz.description || '');
+    setEditQuizDueDate(quiz.dueDate ? quiz.dueDate.substring(0, 16) : '');
+    setEditQuizMaxAttempts(quiz.maxAttempts || 3);
+    setShowEditQuizInfoModal(true);
+  };
+
+  const handleSaveQuizInfo = async (e) => {
+    e.preventDefault();
+    if (!editQuizTitle.trim()) {
+      alert('O título do quiz é obrigatório.');
+      return;
+    }
+    setSavingQuizInfo(true);
+    try {
+      await quizService.updateQuiz(quiz.id, {
+        title: editQuizTitle.trim(),
+        description: editQuizDescription.trim(),
+        dueDate: editQuizDueDate ? new Date(editQuizDueDate).toISOString() : null,
+        maxAttempts: parseInt(editQuizMaxAttempts, 10) || 3
+      });
+      setShowEditQuizInfoModal(false);
+      await loadQuizData();
+    } catch (err) {
+      alert('Erro ao atualizar informações do quiz: ' + err.message);
+    } finally {
+      setSavingQuizInfo(false);
+    }
+  };
+
+  const handleDeleteQuiz = async () => {
+    if (
+      !window.confirm(
+        `ATENÇÃO: Deseja realmente excluir o quiz "${quiz.title}" e todas as tentativas registradas?`
+      )
+    ) {
+      return;
+    }
+    try {
+      await quizService.deleteQuiz(quiz.id);
+      navigate(`/courses/${quiz.courseId || courseId}`);
+    } catch (err) {
+      alert('Erro ao excluir quiz: ' + err.message);
+    }
+  };
+
+  const handleDeleteAttempt = async (attemptId, studentName) => {
+    if (
+      !window.confirm(
+        `Deseja realmente excluir esta tentativa de "${studentName || 'aluno'}"? Isso liberará uma nova tentativa para o estudante.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await quizService.deleteQuizAttempt(attemptId);
+      await loadQuizData();
+    } catch (err) {
+      alert('Erro ao excluir tentativa: ' + err.message);
     }
   };
 
@@ -247,16 +329,35 @@ export default function QuizPage() {
         </Link>
 
         {canEdit && (
-          <button
-            type="button"
-            className={`btn btn-sm ${editorMode ? 'btn-secondary' : 'btn-primary'}`}
-            onClick={() => {
-              setEditorMode(!editorMode);
-              setEditableQuiz(JSON.parse(JSON.stringify(quiz)));
-            }}
-          >
-            {editorMode ? '👁️ Ver Quiz do Aluno' : '✏️ Editar Questões do Quiz'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              onClick={handleOpenEditQuizInfo}
+              title="Editar título, prazo e tentativas do quiz"
+            >
+              ⚙️ Configurar Quiz
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${editorMode ? 'btn-secondary' : 'btn-primary'}`}
+              onClick={() => {
+                setEditorMode(!editorMode);
+                setEditableQuiz(JSON.parse(JSON.stringify(quiz)));
+              }}
+            >
+              {editorMode ? '👁️ Ver Quiz' : '✏️ Editar Questões'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              onClick={handleDeleteQuiz}
+              style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+              title="Excluir Quiz (Admin / Professor)"
+            >
+              🗑️ Excluir Quiz
+            </button>
+          </div>
         )}
       </div>
 
@@ -637,6 +738,155 @@ export default function QuizPage() {
               ))}
             </div>
           )}
+
+          {/* TENTATIVAS DE TODOS OS ALUNOS (PARA PROFESSOR / ADMIN) */}
+          {canEdit && allAttempts.length > 0 && (
+            <div className="card">
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>
+                Histórico Geral de Tentativas dos Alunos ({allAttempts.length})
+              </h2>
+              <div className="table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Aluno</th>
+                      <th>Data e Horário</th>
+                      <th>Nota</th>
+                      <th>Aproveitamento</th>
+                      <th style={{ textAlign: 'center' }}>Ação de Admin</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allAttempts.map((atm) => (
+                      <tr key={atm.id}>
+                        <td style={{ fontWeight: 600 }}>{atm.studentName || 'Estudante'}</td>
+                        <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                          {new Date(atm.attemptedAt).toLocaleString('pt-BR')}
+                        </td>
+                        <td>
+                          <strong style={{ color: atm.score >= 6 ? 'var(--success)' : 'var(--danger)' }}>
+                            {atm.score} / 10,0
+                          </strong>
+                        </td>
+                        <td>
+                          <span className="user-role-tag role-student">
+                            {atm.percentage}% acertos
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline"
+                            onClick={() => handleDeleteAttempt(atm.id, atm.studentName)}
+                            style={{ color: '#dc2626', borderColor: '#fca5a5', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                            title="Excluir tentativa e liberar nova chance (Admin)"
+                          >
+                            🗑️ Resetar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL DE EDIÇÃO DE INFORMAÇÕES DO QUIZ (ADMIN / PROFESSOR) */}
+      {showEditQuizInfoModal && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-content" style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>
+                Configurar Informações do Quiz (Admin)
+              </h2>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setShowEditQuizInfoModal(false)}
+                style={{ padding: '0.2rem 0.6rem' }}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveQuizInfo}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-quiz-title">
+                    Título do Quiz *
+                  </label>
+                  <input
+                    id="edit-quiz-title"
+                    type="text"
+                    className="form-input"
+                    value={editQuizTitle}
+                    onChange={(e) => setEditQuizTitle(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-quiz-due">
+                      Data Limite
+                    </label>
+                    <input
+                      id="edit-quiz-due"
+                      type="datetime-local"
+                      className="form-input"
+                      value={editQuizDueDate}
+                      onChange={(e) => setEditQuizDueDate(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-quiz-attempts">
+                      Limite de Tentativas
+                    </label>
+                    <input
+                      id="edit-quiz-attempts"
+                      type="number"
+                      min="1"
+                      max="10"
+                      className="form-input"
+                      value={editQuizMaxAttempts}
+                      onChange={(e) => setEditQuizMaxAttempts(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-quiz-desc">
+                    Descrição / Instruções do Quiz
+                  </label>
+                  <textarea
+                    id="edit-quiz-desc"
+                    className="form-textarea"
+                    rows={4}
+                    value={editQuizDescription}
+                    onChange={(e) => setEditQuizDescription(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowEditQuizInfoModal(false)}
+                  disabled={savingQuizInfo}
+                >
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={savingQuizInfo}>
+                  {savingQuizInfo ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

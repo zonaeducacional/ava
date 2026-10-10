@@ -15,6 +15,7 @@ import {
   Sparkles,
   ThumbsUp,
   Trash2,
+  Edit2,
   Tag,
   BookOpen,
   HelpCircle,
@@ -30,6 +31,9 @@ export default function CourseDoubtForum({
   canManage = false, // Professor do curso ou Admin
   initialSectionId = null
 }) {
+  const isAdmin = user?.role === 'admin';
+  const hasAdminRights = canManage || isAdmin;
+
   const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -51,6 +55,19 @@ export default function CourseDoubtForum({
   const [newSectionId, setNewSectionId] = useState(initialSectionId || '');
   const [selectedTags, setSelectedTags] = useState(['Dúvida Geral']);
   const [submittingTopic, setSubmittingTopic] = useState(false);
+
+  // Modal de Edição de Dúvida / Tópico (Admin / Autor)
+  const [showEditTopicModal, setShowEditTopicModal] = useState(false);
+  const [editTopicTitle, setEditTopicTitle] = useState('');
+  const [editTopicContent, setEditTopicContent] = useState('');
+  const [editTopicSectionId, setEditTopicSectionId] = useState('');
+  const [editTopicTags, setEditTopicTags] = useState([]);
+  const [savingTopicEdit, setSavingTopicEdit] = useState(false);
+
+  // Edição inline de Resposta
+  const [editingReplyId, setEditingReplyId] = useState(null);
+  const [editReplyText, setEditReplyText] = useState('');
+  const [savingReplyEdit, setSavingReplyEdit] = useState(false);
 
   // Campo de Resposta no Tópico Aberto
   const [replyContent, setReplyContent] = useState('');
@@ -263,6 +280,87 @@ export default function CourseDoubtForum({
       await loadTopics();
     } catch (err) {
       alert('Erro ao excluir tópico: ' + err.message);
+    }
+  };
+
+  // Abrir Modal de Edição de Dúvida
+  const handleOpenEditTopic = () => {
+    if (!activeTopic) return;
+    setEditTopicTitle(activeTopic.title || '');
+    setEditTopicContent(activeTopic.content || '');
+    setEditTopicSectionId(activeTopic.sectionId || '');
+    setEditTopicTags(activeTopic.tags || []);
+    setShowEditTopicModal(true);
+  };
+
+  // Salvar Edição de Dúvida
+  const handleSaveEditTopic = async (e) => {
+    e.preventDefault();
+    if (!activeTopic) return;
+    if (!editTopicTitle.trim() || !editTopicContent.trim()) {
+      alert('Título e conteúdo são obrigatórios.');
+      return;
+    }
+    setSavingTopicEdit(true);
+    try {
+      let secTitle = 'Geral do Curso';
+      if (editTopicSectionId && course?.sections) {
+        const found = course.sections.find((s) => s.id === editTopicSectionId);
+        if (found) secTitle = found.title;
+      }
+
+      await forumService.updateTopic(activeTopic.id, {
+        title: editTopicTitle.trim(),
+        content: editTopicContent.trim(),
+        sectionId: editTopicSectionId || null,
+        sectionTitle: secTitle,
+        tags: editTopicTags
+      });
+
+      setShowEditTopicModal(false);
+      await loadActiveTopic(activeTopic.id);
+      await loadTopics();
+    } catch (err) {
+      alert('Erro ao atualizar dúvida: ' + err.message);
+    } finally {
+      setSavingTopicEdit(false);
+    }
+  };
+
+  // Excluir Resposta
+  const handleDeleteReply = async (replyId) => {
+    if (!activeTopic) return;
+    if (!window.confirm('Tem certeza que deseja excluir esta resposta?')) return;
+    try {
+      await forumService.deleteReply(activeTopic.id, replyId);
+      await loadActiveTopic(activeTopic.id);
+      await loadTopics();
+    } catch (err) {
+      alert('Erro ao excluir resposta: ' + err.message);
+    }
+  };
+
+  // Iniciar Edição de Resposta
+  const handleOpenEditReply = (reply) => {
+    setEditingReplyId(reply.id);
+    setEditReplyText(reply.content || '');
+  };
+
+  // Salvar Edição de Resposta
+  const handleSaveEditReply = async (replyId) => {
+    if (!editReplyText.trim()) {
+      alert('O texto da resposta não pode estar vazio.');
+      return;
+    }
+    setSavingReplyEdit(true);
+    try {
+      await forumService.updateReply(replyId, editReplyText.trim());
+      setEditingReplyId(null);
+      await loadActiveTopic(activeTopic.id);
+    } catch (err) {
+      alert('Erro ao atualizar resposta: ' + err.message);
+    } finally {
+      setSavingReplyEdit(false);
     }
   };
 
@@ -547,9 +645,9 @@ export default function CourseDoubtForum({
                 </span>
               </div>
 
-              {/* Ações do Docente/Admin */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                {canManage && (
+              {/* Ações do Docente/Admin e Autor */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                {hasAdminRights && (
                   <>
                     <button
                       type="button"
@@ -578,15 +676,31 @@ export default function CourseDoubtForum({
                     >
                       {activeTopic.status === 'answered' ? 'Marcar Pendente' : 'Marcar Respondido'}
                     </button>
+                  </>
+                )}
+
+                {(hasAdminRights || activeTopic.authorId === user?.id) && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      onClick={handleOpenEditTopic}
+                      title="Editar dúvida (Admin / Autor)"
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                    >
+                      <Edit2 size={13} />
+                      <span>Editar</span>
+                    </button>
 
                     <button
                       type="button"
                       className="btn btn-sm btn-danger"
                       onClick={handleDeleteTopic}
-                      title="Excluir dúvida"
-                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                      title="Excluir dúvida (Admin / Autor)"
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
                     >
                       <Trash2 size={13} />
+                      <span>Excluir</span>
                     </button>
                   </>
                 )}
@@ -774,8 +888,8 @@ export default function CourseDoubtForum({
                           </div>
                         </div>
 
-                        {/* Botão de Voto Útil */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {/* Ações da Resposta: Voto Útil, Editar, Excluir */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                           <button
                             type="button"
                             onClick={() => handleUpvoteReply(reply.id)}
@@ -793,20 +907,90 @@ export default function CourseDoubtForum({
                             <ThumbsUp size={13} color="#2e97b7" />
                             <span>Útil ({reply.upvotes || 0})</span>
                           </button>
+
+                          {(hasAdminRights || reply.authorId === user?.id) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditReply(reply)}
+                                className="btn btn-sm btn-outline"
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '0.2rem 0.45rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem'
+                                }}
+                                title="Editar resposta (Admin / Autor)"
+                              >
+                                <Edit2 size={12} />
+                                <span>Editar</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteReply(reply.id)}
+                                className="btn btn-sm btn-outline"
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '0.2rem 0.45rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  color: '#dc2626',
+                                  borderColor: '#fca5a5'
+                                }}
+                                title="Excluir resposta (Admin / Autor)"
+                              >
+                                <Trash2 size={12} />
+                                <span>Excluir</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
 
-                      {/* Texto da Resposta */}
-                      <div
-                        style={{
-                          whiteSpace: 'pre-wrap',
-                          lineHeight: 1.6,
-                          fontSize: '0.925rem',
-                          color: '#132f38'
-                        }}
-                      >
-                        {reply.content}
-                      </div>
+                      {/* Texto da Resposta ou Formulário de Edição */}
+                      {editingReplyId === reply.id ? (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <textarea
+                            className="form-textarea"
+                            rows={3}
+                            value={editReplyText}
+                            onChange={(e) => setEditReplyText(e.target.value)}
+                            style={{ width: '100%', fontSize: '0.9rem', marginBottom: '0.5rem' }}
+                          />
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => setEditingReplyId(null)}
+                              disabled={savingReplyEdit}
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-primary"
+                              onClick={() => handleSaveEditReply(reply.id)}
+                              disabled={savingReplyEdit}
+                            >
+                              {savingReplyEdit ? 'Salvando...' : 'Salvar Alteração'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            whiteSpace: 'pre-wrap',
+                            lineHeight: 1.6,
+                            fontSize: '0.925rem',
+                            color: '#132f38'
+                          }}
+                        >
+                          {reply.content}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1362,6 +1546,97 @@ export default function CourseDoubtForum({
                   disabled={submittingTopic || !newTitle.trim() || !newContent.trim()}
                 >
                   {submittingTopic ? 'Publicando...' : 'Publicar Pergunta'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDIÇÃO DE DÚVIDA / TÓPICO (ADMIN / AUTOR) */}
+      {showEditTopicModal && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-content" style={{ maxWidth: '680px' }}>
+            <div className="modal-header">
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#132f38', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Edit2 size={20} color="#2e97b7" />
+                <span>Editar Dúvida do Fórum (Admin / Autor)</span>
+              </h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowEditTopicModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditTopic}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-topic-title">
+                    Título da Dúvida *
+                  </label>
+                  <input
+                    id="edit-topic-title"
+                    type="text"
+                    className="form-input"
+                    value={editTopicTitle}
+                    onChange={(e) => setEditTopicTitle(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-topic-section">
+                    Módulo ou Seção do Curso
+                  </label>
+                  <select
+                    id="edit-topic-section"
+                    className="form-select"
+                    value={editTopicSectionId}
+                    onChange={(e) => setEditTopicSectionId(e.target.value)}
+                  >
+                    <option value="">Geral do Curso</option>
+                    {course?.sections?.map((sec) => (
+                      <option key={sec.id} value={sec.id}>
+                        {sec.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-topic-content">
+                    Conteúdo / Texto da Pergunta *
+                  </label>
+                  <textarea
+                    id="edit-topic-content"
+                    rows={6}
+                    className="form-textarea"
+                    value={editTopicContent}
+                    onChange={(e) => setEditTopicContent(e.target.value)}
+                    required
+                    style={{ lineHeight: 1.5 }}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowEditTopicModal(false)}
+                  disabled={savingTopicEdit}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingTopicEdit || !editTopicTitle.trim() || !editTopicContent.trim()}
+                >
+                  {savingTopicEdit ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </div>
             </form>

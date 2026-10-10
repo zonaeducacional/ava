@@ -796,6 +796,10 @@ class Database {
     return list;
   }
 
+  findById(collection, id) {
+    return this.find(collection, id);
+  }
+
   insert(collection, item) {
     if (!this.data[collection]) {
       this.data[collection] = [];
@@ -807,6 +811,10 @@ class Database {
     this.data[collection].push(newItem);
     this.persist();
     return JSON.parse(JSON.stringify(newItem));
+  }
+
+  create(collection, item) {
+    return this.insert(collection, item);
   }
 
   update(collection, id, updates) {
@@ -831,6 +839,10 @@ class Database {
       this.persist();
     }
     return removed;
+  }
+
+  delete(collection, id) {
+    return this.remove(collection, id);
   }
 }
 

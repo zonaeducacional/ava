@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   assignmentService,
@@ -9,6 +9,7 @@ import {
 
 export default function AssignmentPage() {
   const { courseId, assignmentId } = useParams();
+  const navigate = useNavigate();
   const { user, isStudent, isTeacher, isAdmin } = useAuth();
 
   const [assignment, setAssignment] = useState(null);
@@ -22,13 +23,21 @@ export default function AssignmentPage() {
   const [submitting, setSubmitting] = useState(false);
   const [studentSuccessMsg, setStudentSuccessMsg] = useState('');
 
-  // Estado do Professor
+  // Estado do Professor / Admin
   const [allSubmissions, setAllSubmissions] = useState([]);
   const [enrolledStudents, setEnrolledStudents] = useState([]);
   const [gradingModalData, setGradingModalData] = useState(null); // submission sendo avaliada
   const [gradeInput, setGradeInput] = useState('');
   const [feedbackInput, setFeedbackInput] = useState('');
   const [gradingLoading, setGradingLoading] = useState(false);
+
+  // Edição de Tarefa (Admin / Professor)
+  const [showEditAssignModal, setShowEditAssignModal] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editDueDate, setEditDueDate] = useState('');
+  const [editMaxScore, setEditMaxScore] = useState(10);
+  const [editLoading, setEditLoading] = useState(false);
 
   const canGrade = isTeacher || isAdmin;
 
@@ -126,6 +135,70 @@ export default function AssignmentPage() {
     }
   };
 
+  const handleOpenEditAssign = () => {
+    if (!assignment) return;
+    setEditTitle(assignment.title || '');
+    setEditDescription(assignment.description || '');
+    setEditDueDate(assignment.dueDate ? assignment.dueDate.substring(0, 16) : '');
+    setEditMaxScore(assignment.maxScore || 10);
+    setShowEditAssignModal(true);
+  };
+
+  const handleSaveEditAssign = async (e) => {
+    e.preventDefault();
+    if (!editTitle.trim()) {
+      alert('O título da tarefa é obrigatório.');
+      return;
+    }
+    setEditLoading(true);
+    try {
+      await assignmentService.updateAssignment(assignment.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        dueDate: editDueDate ? new Date(editDueDate).toISOString() : null,
+        maxScore: parseFloat(editMaxScore) || 10
+      });
+      setShowEditAssignModal(false);
+      await loadAssignmentData();
+    } catch (err) {
+      alert('Erro ao atualizar tarefa: ' + err.message);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleDeleteAssign = async () => {
+    if (
+      !window.confirm(
+        `ATENÇÃO: Deseja realmente excluir a tarefa "${assignment.title}" e todas as entregas associadas?`
+      )
+    ) {
+      return;
+    }
+    try {
+      await assignmentService.deleteAssignment(assignment.id);
+      navigate(`/courses/${assignment.courseId || courseId}`);
+    } catch (err) {
+      alert('Erro ao excluir tarefa: ' + err.message);
+    }
+  };
+
+  const handleDeleteSubmission = async (submissionId, studentName) => {
+    if (
+      !window.confirm(
+        `Deseja realmente excluir a entrega de "${studentName}"? Isso permitirá que o aluno envie novamente a atividade.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await assignmentService.deleteSubmission(submissionId);
+      await loadAssignmentData();
+    } catch (err) {
+      alert('Erro ao excluir entrega: ' + err.message);
+    }
+  };
+
   if (loading) {
     return (
       <div className="loading-state">
@@ -158,9 +231,33 @@ export default function AssignmentPage() {
       <div className="card" style={{ marginBottom: '2rem' }}>
         <div className="course-card-top">
           <span className="item-type-badge type-assignment">Tarefa Avaliativa</span>
-          <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>
-            Nota máxima: {assignment.maxScore || 10} pontos
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>
+              Nota máxima: {assignment.maxScore || 10} pontos
+            </span>
+            {canGrade && (
+              <div style={{ display: 'flex', gap: '0.35rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={handleOpenEditAssign}
+                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.8rem' }}
+                  title="Editar Tarefa (Admin / Professor)"
+                >
+                  ✏️ Editar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={handleDeleteAssign}
+                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.8rem', color: '#dc2626', borderColor: '#fca5a5' }}
+                  title="Excluir Tarefa (Admin / Professor)"
+                >
+                  🗑️ Excluir
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <h1 style={{ fontSize: '1.6rem', fontWeight: 700, margin: '0.5rem 0' }}>
@@ -348,13 +445,27 @@ export default function AssignmentPage() {
                           )}
                         </td>
                         <td>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline"
-                            onClick={() => handleOpenGradeModal(sub)}
-                          >
-                            {isGraded ? 'Reavaliar' : 'Avaliar'}
-                          </button>
+                          <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline"
+                              onClick={() => handleOpenGradeModal(sub)}
+                              title="Avaliar ou reavaliar entrega"
+                            >
+                              {isGraded ? 'Reavaliar' : 'Avaliar'}
+                            </button>
+                            {canGrade && (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline"
+                                onClick={() => handleDeleteSubmission(sub.id, sub.studentName)}
+                                style={{ color: '#dc2626', borderColor: '#fca5a5', padding: '0.25rem 0.5rem' }}
+                                title="Excluir/Resetar entrega (Admin)"
+                              >
+                                🗑️
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -448,6 +559,103 @@ export default function AssignmentPage() {
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={gradingLoading}>
                   {gradingLoading ? 'Salvando...' : 'Salvar Avaliação'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDIÇÃO DE TAREFA (ADMIN / PROFESSOR) */}
+      {showEditAssignModal && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-content" style={{ maxWidth: '640px' }}>
+            <div className="modal-header">
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>
+                Editar Tarefa (Administrador)
+              </h2>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setShowEditAssignModal(false)}
+                style={{ padding: '0.2rem 0.6rem' }}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditAssign}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-assign-title">
+                    Título da Tarefa *
+                  </label>
+                  <input
+                    id="edit-assign-title"
+                    type="text"
+                    className="form-input"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-assign-due">
+                      Data Limite de Entrega
+                    </label>
+                    <input
+                      id="edit-assign-due"
+                      type="datetime-local"
+                      className="form-input"
+                      value={editDueDate}
+                      onChange={(e) => setEditDueDate(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="edit-assign-maxscore">
+                      Nota Máxima (Pontos)
+                    </label>
+                    <input
+                      id="edit-assign-maxscore"
+                      type="number"
+                      step="0.5"
+                      min="1"
+                      max="100"
+                      className="form-input"
+                      value={editMaxScore}
+                      onChange={(e) => setEditMaxScore(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="edit-assign-desc">
+                    Instruções e Enunciado da Tarefa *
+                  </label>
+                  <textarea
+                    id="edit-assign-desc"
+                    className="form-textarea"
+                    rows={6}
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowEditAssignModal(false)}
+                  disabled={editLoading}
+                >
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={editLoading}>
+                  {editLoading ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </div>
             </form>

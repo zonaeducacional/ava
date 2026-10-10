@@ -2,7 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import CircularProgress from '../components/CircularProgress.jsx';
-import { gradeService, courseService, enrollmentService } from '../services/index.js';
+import {
+  gradeService,
+  courseService,
+  enrollmentService,
+  assignmentService,
+  quizService
+} from '../services/index.js';
+import { db } from '../lib/db.js';
 
 export default function Grades() {
   const { user, isStudent, isTeacher, isAdmin } = useAuth();
@@ -24,6 +31,12 @@ export default function Grades() {
   const [teacherCourses, setTeacherCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState(searchParams.get('courseId') || '');
   const [gradebook, setGradebook] = useState(null);
+
+  // Edição / Exclusão de Nota Direta na Célula do Boletim (Admin / Professor)
+  const [editingCell, setEditingCell] = useState(null);
+  const [cellScoreInput, setCellScoreInput] = useState('');
+  const [cellFeedbackInput, setCellFeedbackInput] = useState('');
+  const [savingCell, setSavingCell] = useState(false);
 
   useEffect(() => {
     loadInitialData();
@@ -89,6 +102,72 @@ export default function Grades() {
       gradeService.exportGradebookCSV(gradebook);
     } catch (err) {
       alert('Erro ao exportar CSV: ' + err.message);
+    }
+  };
+
+  const handleOpenEditCell = (student, act, currentScore) => {
+    setEditingCell({
+      studentId: student.studentId,
+      studentName: student.studentName,
+      activityId: act.id,
+      activityTitle: act.title,
+      activityType: act.type,
+      maxScore: act.maxScore || 10,
+      currentScore
+    });
+    setCellScoreInput(currentScore !== null && currentScore !== undefined ? String(currentScore) : '');
+    setCellFeedbackInput('');
+  };
+
+  const handleSaveCell = async (e) => {
+    e.preventDefault();
+    if (!editingCell) return;
+    const num = parseFloat(cellScoreInput);
+    if (isNaN(num) || num < 0 || num > editingCell.maxScore) {
+      alert(`A nota deve estar entre 0 e ${editingCell.maxScore}.`);
+      return;
+    }
+    setSavingCell(true);
+    try {
+      await gradeService.updateStudentGrade({
+        activityId: editingCell.activityId,
+        activityType: editingCell.activityType,
+        studentId: editingCell.studentId,
+        score: num,
+        feedback: cellFeedbackInput,
+        gradedBy: user.name
+      });
+      setEditingCell(null);
+      await loadCourseGradebook(selectedCourseId);
+    } catch (err) {
+      alert('Erro ao salvar nota: ' + err.message);
+    } finally {
+      setSavingCell(false);
+    }
+  };
+
+  const handleDeleteCell = async () => {
+    if (!editingCell) return;
+    if (
+      !window.confirm(
+        `Deseja realmente remover/excluir a nota de "${editingCell.studentName}" para "${editingCell.activityTitle}"?`
+      )
+    ) {
+      return;
+    }
+    setSavingCell(true);
+    try {
+      await gradeService.deleteStudentGrade({
+        activityId: editingCell.activityId,
+        activityType: editingCell.activityType,
+        studentId: editingCell.studentId
+      });
+      setEditingCell(null);
+      await loadCourseGradebook(selectedCourseId);
+    } catch (err) {
+      alert('Erro ao excluir nota: ' + err.message);
+    } finally {
+      setSavingCell(false);
     }
   };
 
@@ -765,19 +844,40 @@ export default function Grades() {
                         const isGiven = score !== null && score !== undefined;
 
                         return (
-                          <td key={act.id} style={{ textAlign: 'center' }}>
-                            {isGiven ? (
-                              <span
-                                style={{
-                                  fontWeight: 600,
-                                  color: score >= 6 ? 'var(--success)' : 'var(--danger)'
-                                }}
-                              >
-                                {score}
-                              </span>
-                            ) : (
-                              <span style={{ color: 'var(--text-muted)' }}>-</span>
-                            )}
+                          <td
+                            key={act.id}
+                            style={{
+                              textAlign: 'center',
+                              cursor: 'pointer',
+                              transition: 'background-color 0.2s',
+                              position: 'relative'
+                            }}
+                            onClick={() => handleOpenEditCell(student, act, score)}
+                            title="Clique para lançar, editar ou excluir nota (Admin / Professor)"
+                          >
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: 'var(--radius-sm)'
+                              }}
+                            >
+                              {isGiven ? (
+                                <span
+                                  style={{
+                                    fontWeight: 700,
+                                    color: score >= 6 ? 'var(--success)' : 'var(--danger)'
+                                  }}
+                                >
+                                  {score}
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)' }}>-</span>
+                              )}
+                              <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>✏️</span>
+                            </div>
                           </td>
                         );
                       })}
@@ -802,6 +902,101 @@ export default function Grades() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODAL DE EDIÇÃO E EXCLUSÃO DE NOTA (ADMIN / PROFESSOR) */}
+      {editingCell && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-content" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 800 }}>Lançar / Editar Nota</h2>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                  {editingCell.studentName} • {editingCell.activityTitle} ({editingCell.activityType})
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setEditingCell(null)}
+                style={{ padding: '0.2rem 0.6rem' }}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveCell}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="cell-score-input">
+                    Nota (0 a {editingCell.maxScore}) *
+                  </label>
+                  <input
+                    id="cell-score-input"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max={editingCell.maxScore}
+                    className="form-input"
+                    value={cellScoreInput}
+                    onChange={(e) => setCellScoreInput(e.target.value)}
+                    placeholder={`Ex: 8.5 (Max: ${editingCell.maxScore})`}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="cell-feedback-input">
+                    Feedback / Observações (opcional)
+                  </label>
+                  <textarea
+                    id="cell-feedback-input"
+                    className="form-textarea"
+                    rows={3}
+                    value={cellFeedbackInput}
+                    onChange={(e) => setCellFeedbackInput(e.target.value)}
+                    placeholder="Comentários sobre a entrega ou correção..."
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  {editingCell.currentScore !== null && editingCell.currentScore !== undefined && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+                      onClick={handleDeleteCell}
+                      disabled={savingCell}
+                      title="Excluir/Zerar a nota deste estudante"
+                    >
+                      🗑️ Excluir Nota
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setEditingCell(null)}
+                    disabled={savingCell}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={savingCell}
+                  >
+                    {savingCell ? 'Salvando...' : 'Salvar Nota'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
