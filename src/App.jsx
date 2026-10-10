@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { FocusModeProvider } from './context/FocusModeContext.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
@@ -22,7 +22,7 @@ export default function App() {
   return (
     <AuthProvider>
       <FocusModeProvider>
-        <BrowserRouter>
+        <HashRouter>
           <Routes>
             {/* Rota pública de autenticação */}
             <Route path="/login" element={<Login />} />
@@ -77,7 +77,7 @@ export default function App() {
             {/* Redirecionamento padrão para rotas inexistentes */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </BrowserRouter>
+        </HashRouter>
       </FocusModeProvider>
     </AuthProvider>
   );
